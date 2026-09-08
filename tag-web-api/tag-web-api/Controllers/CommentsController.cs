@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
+using System.Security.Claims;
 using TAGWEBAPI.Data;
 using TAGWEBAPI.Hubs;
 using TAGWEBAPI.Models;
@@ -54,13 +55,7 @@ public class CommentsController : ControllerBase
                 .Take(pageSize)
                 .ToListAsync();
 
-            var commentDtos = new List<CommentDto>();
-
-            foreach (var comment in comments)
-            {
-                var dto = await MapToCommentDto(comment, includeReplies);
-                commentDtos.Add(dto);
-            }
+            var commentDtos = await BuildCommentDtosAsync(comments, includeReplies);
 
             return Ok(new CommentsResponse
             {
@@ -102,13 +97,7 @@ public class CommentsController : ControllerBase
                 .Take(pageSize)
                 .ToListAsync();
 
-            var replyDtos = new List<CommentDto>();
-
-            foreach (var reply in replies)
-            {
-                var dto = await MapToCommentDto(reply, false);
-                replyDtos.Add(dto);
-            }
+            var replyDtos = await BuildCommentDtosAsync(replies, false);
 
             return Ok(new CommentsResponse
             {
@@ -140,13 +129,37 @@ public class CommentsController : ControllerBase
                 return BadRequest("Comment content must be between 1 and 2000 characters");
             }
 
+            // The authenticated JWT identity is the source of truth for authorship, not the request body.
+            var authenticatedUserId = GetAuthenticatedUserId();
+            if (authenticatedUserId == null)
+            {
+                return Unauthorized("Unable to resolve authenticated user from token");
+            }
+
             // Validate user exists
             var userExists = await _context.Set<NextAuthUser>()
-                .AnyAsync(u => u.Id == request.UserId);
+                .AnyAsync(u => u.Id == authenticatedUserId.Value);
 
             if (!userExists)
             {
                 return BadRequest("User not found");
+            }
+
+            // If posting as a profile context (e.g. an artist), verify the authenticated user owns/is linked to it.
+            if (string.Equals(request.AuthorEntityType, "artist", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!request.AuthorEntityId.HasValue)
+                {
+                    return BadRequest("authorEntityId is required when authorEntityType is 'artist'");
+                }
+
+                var ownsArtist = await _context.Set<Linker_UserToArtist>()
+                    .AnyAsync(link => link.UserID == authenticatedUserId.Value && link.ArtistID == request.AuthorEntityId.Value);
+
+                if (!ownsArtist)
+                {
+                    return StatusCode(StatusCodes.Status403Forbidden, "You are not authorized to comment as this artist profile");
+                }
             }
 
             // If it's a reply, validate parent comment exists
@@ -165,9 +178,12 @@ public class CommentsController : ControllerBase
             {
                 TargetType = request.TargetType,
                 TargetId = request.TargetId,
-                UserId = request.UserId,
+                UserId = authenticatedUserId.Value,
                 Content = request.Content.Trim(),
                 ParentCommentId = request.ParentCommentId,
+                AuthorContextId = request.AuthorContextId,
+                AuthorEntityType = request.AuthorEntityType,
+                AuthorEntityId = request.AuthorEntityId,
                 CreatedAt = DateTime.UtcNow
             };
 
@@ -176,7 +192,7 @@ public class CommentsController : ControllerBase
 
             await BroadcastCommentSummaryToOwners(comment);
 
-            var commentDto = await MapToCommentDto(comment, false);
+            var commentDto = await MapSingleCommentToDtoAsync(comment, false);
 
             return CreatedAtAction(nameof(GetCommentById), new { id = comment.Id }, commentDto);
         }
@@ -230,7 +246,7 @@ public class CommentsController : ControllerBase
 
             await _context.SaveChangesAsync();
 
-            var commentDto = await MapToCommentDto(comment, false);
+            var commentDto = await MapSingleCommentToDtoAsync(comment, false);
 
             return Ok(commentDto);
         }
@@ -296,7 +312,7 @@ public class CommentsController : ControllerBase
                 return NotFound("Comment not found");
             }
 
-            var commentDto = await MapToCommentDto(comment, true);
+            var commentDto = await MapSingleCommentToDtoAsync(comment, true);
 
             return Ok(commentDto);
         }
@@ -359,36 +375,65 @@ public class CommentsController : ControllerBase
         });
     }
 
-    private async Task<CommentDto> MapToCommentDto(Comment comment, bool includeReplies)
+    // Convenience wrapper for mapping a single already-tracked comment (create/update/get-by-id call sites).
+    private async Task<CommentDto> MapSingleCommentToDtoAsync(Comment comment, bool includeReplies)
     {
-        // Fetch user details
-        var user = await _context.Set<NextAuthUser>()
-            .Where(u => u.Id == comment.UserId)
-            .Select(u => new UserInfoDto
-            {
-                Id = u.Id,
-                Name = u.Name ?? "Unknown User",
-                Email = u.Email,
-                Image = u.Image
-            })
-            .FirstOrDefaultAsync();
+        var dtos = await BuildCommentDtosAsync(new List<Comment> { comment }, includeReplies);
+        return dtos[0];
+    }
 
-        // Fallback if user not found
-        if (user == null)
+    // Maps a page of top-level comments (and, optionally, their first-level replies) to DTOs using
+    // batched queries: one query for reply data, one for user identities, one for artist identities.
+    // No per-comment queries are issued, regardless of how many comments/authors are in the page.
+    private async Task<List<CommentDto>> BuildCommentDtosAsync(List<Comment> topLevelComments, bool includeReplies)
+    {
+        if (topLevelComments.Count == 0)
         {
-            user = new UserInfoDto
-            {
-                Id = comment.UserId,
-                Name = "Unknown User",
-                Email = null,
-                Image = null
-            };
+            return new List<CommentDto>();
         }
 
-        // Get reply count
-        var replyCount = await _context.Comments
-            .Where(c => c.ParentCommentId == comment.Id && !c.IsDeleted)
-            .CountAsync();
+        var repliesByParent = new Dictionary<long, List<Comment>>();
+        var replyCounts = new Dictionary<long, int>();
+
+        if (includeReplies)
+        {
+            var topLevelIds = topLevelComments.Select(c => c.Id).ToList();
+
+            // Single query for every first-level reply across the whole page of comments.
+            var allReplies = await _context.Comments
+                .AsNoTracking()
+                .Where(c => c.ParentCommentId != null && topLevelIds.Contains(c.ParentCommentId.Value) && !c.IsDeleted)
+                .OrderBy(c => c.CreatedAt)
+                .ToListAsync();
+
+            foreach (var group in allReplies.GroupBy(c => c.ParentCommentId!.Value))
+            {
+                replyCounts[group.Key] = group.Count();
+                repliesByParent[group.Key] = group.Take(3).ToList(); // Preview only the first 3 replies.
+            }
+        }
+
+        // Resolve author identities (base user + artist profile) for top-level comments and their previewed replies in one pass.
+        var allComments = topLevelComments.Concat(repliesByParent.Values.SelectMany(replies => replies)).ToList();
+        var (userLookup, artistLookup) = await LoadAuthorLookupsAsync(allComments);
+
+        return topLevelComments
+            .Select(comment => BuildCommentDto(comment, userLookup, artistLookup, replyCounts, repliesByParent))
+            .ToList();
+    }
+
+    private static CommentDto BuildCommentDto(
+        Comment comment,
+        IReadOnlyDictionary<int, UserInfoDto> userLookup,
+        IReadOnlyDictionary<int, (string Title, string? ImageUrl)> artistLookup,
+        IReadOnlyDictionary<long, int> replyCounts,
+        IReadOnlyDictionary<long, List<Comment>> repliesByParent)
+    {
+        var user = userLookup.TryGetValue(comment.UserId, out var foundUser)
+            ? foundUser
+            : new UserInfoDto { Id = comment.UserId, Name = "Unknown User", Email = null, Image = null };
+
+        var (authorDisplayName, authorImage, authorEntityType) = ResolveAuthorDisplay(comment, user, artistLookup);
 
         var dto = new CommentDto
         {
@@ -399,31 +444,92 @@ public class CommentsController : ControllerBase
             User = user,
             Content = comment.Content,
             ParentCommentId = comment.ParentCommentId,
+            AuthorContextId = comment.AuthorContextId,
+            AuthorEntityType = authorEntityType,
+            AuthorEntityId = comment.AuthorEntityId,
+            AuthorDisplayName = authorDisplayName,
+            AuthorImage = authorImage,
             IsEdited = comment.IsEdited,
             IsDeleted = comment.IsDeleted,
             CreatedAt = comment.CreatedAt,
             UpdatedAt = comment.UpdatedAt,
-            ReplyCount = replyCount
+            ReplyCount = replyCounts.TryGetValue(comment.Id, out var count) ? count : 0,
         };
 
-        // Load replies if requested
-        if (includeReplies && replyCount > 0)
+        if (repliesByParent.TryGetValue(comment.Id, out var replies))
         {
-            var replies = await _context.Comments
-                .Where(c => c.ParentCommentId == comment.Id && !c.IsDeleted)
-                .OrderBy(c => c.CreatedAt)
-                .Take(3) // Load only first 3 replies initially
-                .ToListAsync();
-
-            dto.Replies = new List<CommentDto>();
-            foreach (var reply in replies)
-            {
-                var replyDto = await MapToCommentDto(reply, false);
-                dto.Replies.Add(replyDto);
-            }
+            dto.Replies = replies
+                .Select(reply => BuildCommentDto(reply, userLookup, artistLookup, replyCounts, repliesByParent))
+                .ToList();
         }
 
         return dto;
+    }
+
+    // Resolves display name/image for the identity a comment was posted as (artist profile, or base user for older/unset comments).
+    private static (string DisplayName, string? Image, string EntityType) ResolveAuthorDisplay(
+        Comment comment,
+        UserInfoDto baseUser,
+        IReadOnlyDictionary<int, (string Title, string? ImageUrl)> artistLookup)
+    {
+        if (string.Equals(comment.AuthorEntityType, "artist", StringComparison.OrdinalIgnoreCase)
+            && comment.AuthorEntityId.HasValue
+            && artistLookup.TryGetValue(comment.AuthorEntityId.Value, out var artist))
+        {
+            return (artist.Title, artist.ImageUrl, "artist");
+        }
+
+        // Fallback: base user identity (covers older comments where AuthorEntityId is null, or unresolved entities)
+        return (baseUser.Name, baseUser.Image, "user");
+    }
+
+    // Batch-loads every user and artist identity referenced by the given comments in exactly two queries total.
+    private async Task<(Dictionary<int, UserInfoDto> Users, Dictionary<int, (string Title, string? ImageUrl)> Artists)> LoadAuthorLookupsAsync(List<Comment> comments)
+    {
+        var userIds = comments.Select(c => c.UserId).Distinct().ToList();
+        var artistIds = comments
+            .Where(c => string.Equals(c.AuthorEntityType, "artist", StringComparison.OrdinalIgnoreCase) && c.AuthorEntityId.HasValue)
+            .Select(c => c.AuthorEntityId!.Value)
+            .Distinct()
+            .ToList();
+
+        var users = await _context.Set<NextAuthUser>()
+            .AsNoTracking()
+            .Where(u => userIds.Contains(u.Id))
+            .Select(u => new UserInfoDto
+            {
+                Id = u.Id,
+                Name = u.Name ?? "Unknown User",
+                Email = u.Email,
+                Image = u.Image
+            })
+            .ToDictionaryAsync(u => u.Id);
+
+        var artistLookup = new Dictionary<int, (string Title, string? ImageUrl)>();
+        if (artistIds.Count > 0)
+        {
+            var artists = await _context.Set<Artist>()
+                .AsNoTracking()
+                .Where(a => artistIds.Contains(a.ArtistID))
+                .Select(a => new { a.ArtistID, a.Title, ImageUrl = a.ProfilePic != null ? a.ProfilePic.URL : null })
+                .ToListAsync();
+
+            foreach (var artist in artists)
+            {
+                artistLookup[artist.ArtistID] = (artist.Title, artist.ImageUrl);
+            }
+        }
+
+        return (users, artistLookup);
+    }
+
+    private int? GetAuthenticatedUserId()
+    {
+        var claim = User.FindFirstValue(ClaimTypes.NameIdentifier)
+            ?? User.FindFirstValue("sub")
+            ?? User.FindFirstValue("userId");
+
+        return int.TryParse(claim, out var userId) ? userId : null;
     }
 
     private async Task BroadcastCommentSummaryToOwners(Comment comment, bool includeSelfActions = true)
