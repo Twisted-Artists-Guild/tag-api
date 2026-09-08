@@ -26,6 +26,20 @@ public class Comment
     [Column("parent_comment_id")]
     public long? ParentCommentId { get; set; }
 
+    // Profile context the comment was posted as, e.g. "artist-12" (null = base user identity).
+    [Column("author_context_id")]
+    [MaxLength(100)]
+    public string? AuthorContextId { get; set; }
+
+    // Entity type of the selected posting identity, e.g. "artist" (null = base user identity).
+    [Column("author_entity_type")]
+    [MaxLength(50)]
+    public string? AuthorEntityType { get; set; }
+
+    // ID of the selected entity (e.g. ArtistID) within AuthorEntityType.
+    [Column("author_entity_id")]
+    public int? AuthorEntityId { get; set; }
+
     [Column("is_edited")]
     public bool IsEdited { get; set; } = false;
 

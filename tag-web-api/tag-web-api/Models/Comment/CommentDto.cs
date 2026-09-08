@@ -9,6 +9,11 @@ public class CommentDto
     public UserInfoDto User { get; set; } = null!;
     public string Content { get; set; } = null!;
     public long? ParentCommentId { get; set; }
+    public string? AuthorContextId { get; set; }
+    public string AuthorEntityType { get; set; } = "user";
+    public int? AuthorEntityId { get; set; }
+    public string AuthorDisplayName { get; set; } = null!;
+    public string? AuthorImage { get; set; }
     public bool IsEdited { get; set; }
     public bool IsDeleted { get; set; }
     public DateTime CreatedAt { get; set; }
@@ -32,6 +37,9 @@ public class CreateCommentRequest
     public int UserId { get; set; }
     public string Content { get; set; } = null!;
     public long? ParentCommentId { get; set; }
+    public string? AuthorContextId { get; set; }
+    public string? AuthorEntityType { get; set; }
+    public int? AuthorEntityId { get; set; }
 }
 
 public class UpdateCommentRequest
