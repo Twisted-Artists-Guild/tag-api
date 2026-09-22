@@ -27,7 +27,7 @@ jobs:
         run: dotnet build tag-web-api/tag-web-api/tag-web-api.sln --configuration Release
 
       - name: dotnet publish
-        run: dotnet publish tag-web-api/tag-web-api/tag-web-api.sln -c Release -o ${{env.DOTNET_ROOT}}/myapprun: dotnet build --configuration Release
+        run: dotnet publish tag-web-api/tag-web-api/tag-web-api.csproj --configuration Release --output ${{ env.DOTNET_ROOT }}/myapp
 
       - name: Upload artifact for deployment job
         uses: actions/upload-artifact@v4
