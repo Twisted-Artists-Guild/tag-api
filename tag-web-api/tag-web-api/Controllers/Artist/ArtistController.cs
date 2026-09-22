@@ -292,6 +292,8 @@ public class ArtistController : ControllerBase
         {
             listings = await _context.Set<Listing>()
                 .Where(l => l.ArtistID == artist.ArtistID && l.IsPublished && !l.IsModerationBlocked)
+                .Include(l => l.Artist)
+                    .ThenInclude(a => a.ProfilePic)
                 .Include(l => l.ArtCategory)
                 .Include(l => l.CoverPic)
                 .ToListAsync()
@@ -304,6 +306,8 @@ public class ArtistController : ControllerBase
 
             listings = await _context.Set<Listing>()
                 .Where(l => l.ArtistID == artist.ArtistID && l.IsPublished && !l.IsModerationBlocked)
+                .Include(l => l.Artist)
+                    .ThenInclude(a => a.ProfilePic)
                 .Include(l => l.CoverPic)
                 .ToListAsync()
                 .ConfigureAwait(false);
@@ -363,7 +367,7 @@ public class ArtistController : ControllerBase
             },
             profilePic = artist.ProfilePic,
             coverPic = artist.CoverPic,
-            listings = listings.Select(MapListingSummaryForApi).ToList(),
+            listings = listings.Select(MapListingSummaryForArtistProfileApi).ToList(),
             contactInfo = new
             {
                 addresses,
@@ -425,6 +429,38 @@ public class ArtistController : ControllerBase
             listing.CoverPic,
             listing.IsPublished,
             listing.IsModerationBlocked,
+            listing.Created,
+        };
+    }
+
+    private static object MapListingSummaryForArtistProfileApi(Listing listing)
+    {
+        return new
+        {
+            listing.ListingID,
+            Title = CoalescePlaintext(listing.Title_Plaintext, listing.Title),
+            TitleRichtext = listing.Title,
+            Description = CoalescePlaintext(listing.Description_Plaintext, listing.Description),
+            DescriptionRichtext = listing.Description,
+            listing.Path,
+            listing.Price,
+            listing.ArtCategoryID,
+            listing.ArtCategory,
+            listing.ArtistID,
+            Artist = listing.Artist == null
+                ? null
+                : new
+                {
+                    Title = CoalescePlaintext(listing.Artist.Title_Plaintext, listing.Artist.Title),
+                    ProfilePic = listing.Artist.ProfilePic == null
+                        ? null
+                        : new
+                        {
+                            URL = listing.Artist.ProfilePic.URL,
+                        },
+                },
+            listing.CoverPicID,
+            listing.CoverPic,
             listing.Created,
         };
     }
