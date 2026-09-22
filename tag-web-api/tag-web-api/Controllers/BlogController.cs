@@ -56,6 +56,31 @@ namespace TAGWEBAPI.Controllers
             return Ok(blogs.Select(MapBlogForApi));
         }
 
+        [HttpGet("published")]
+        [AllowAnonymous]
+        public async Task<ActionResult<IEnumerable<PublishedBlogResponse>>> GetPublishedBlogs()
+        {
+            if (_context.Blogs == null)
+            {
+                return NotFound();
+            }
+
+            var blogs = await _context.Blogs
+                .AsNoTracking()
+                .Where(b => b.StatusID == BlogStatus.Published)
+                .Include(b => b.User)
+                    .ThenInclude(user => user.ProfilePic)
+                .Include(b => b.Gallery!)
+                    .ThenInclude(g => g.GalleryItems)
+                    .ThenInclude(gi => gi.Picture)
+                .Include(b => b.Gallery!)
+                    .ThenInclude(g => g.GalleryItems)
+                    .ThenInclude(gi => gi.Video)
+                .ToListAsync();
+
+            return Ok(blogs.Select(MapPublishedBlogForApi));
+        }
+
         [HttpGet("{id}")]
         [AllowAnonymous]
         public async Task<ActionResult<Blog>> GetBlog(int id)
@@ -774,6 +799,41 @@ namespace TAGWEBAPI.Controllers
             };
         }
 
+        private static PublishedBlogResponse MapPublishedBlogForApi(Blog blog)
+        {
+            return new PublishedBlogResponse
+            {
+                BlogID = blog.BlogID,
+                Body = CoalescePlaintext(blog.Body_Plaintext, blog.Body),
+                BodyRichtext = blog.Body,
+                Byline = CoalescePlaintext(blog.Byline_Plaintext, blog.Byline),
+                BylineRichtext = blog.Byline,
+                Created = blog.Created,
+                Modified = blog.Modified,
+                Path = blog.Path,
+                Title = CoalescePlaintext(blog.Title_Plaintext, blog.Title),
+                TitleRichtext = blog.Title,
+                UserID = blog.UserID,
+                GalleryID = blog.GalleryID,
+                CoverPicID = blog.CoverPicID,
+                User = blog.User == null
+                    ? null
+                    : new UserPublicSummaryResponse
+                    {
+                        UserID = blog.User.UserID,
+                        Username = blog.User.Username ?? string.Empty,
+                        PreferredName = string.IsNullOrWhiteSpace(blog.User.PreferredName)
+                            ? blog.User.Username ?? string.Empty
+                            : blog.User.PreferredName,
+                        ProfilePic = blog.User.ProfilePic?.URL,
+                    },
+                Gallery = blog.Gallery,
+                CoverPic = blog.CoverPic,
+                StatusID = blog.StatusID,
+                Status = blog.StatusID.ToString(),
+            };
+        }
+
         private static string? CoalescePlaintext(string? plaintext, string? richtext)
         {
             return !string.IsNullOrWhiteSpace(plaintext)
@@ -969,5 +1029,44 @@ namespace TAGWEBAPI.Controllers
         public string? Url { get; set; }
 
         public string? EmbedURL { get; set; }
+    }
+
+    public class PublishedBlogResponse
+    {
+        public int BlogID { get; set; }
+
+        public string? Body { get; set; }
+
+        public string BodyRichtext { get; set; }
+
+        public string? Byline { get; set; }
+
+        public string BylineRichtext { get; set; }
+
+        public DateTime Created { get; set; }
+
+        public DateTime? Modified { get; set; }
+
+        public string Path { get; set; }
+
+        public string? Title { get; set; }
+
+        public string TitleRichtext { get; set; }
+
+        public int UserID { get; set; }
+
+        public int? GalleryID { get; set; }
+
+        public int? CoverPicID { get; set; }
+
+        public UserPublicSummaryResponse? User { get; set; }
+
+        public Gallery? Gallery { get; set; }
+
+        public Picture? CoverPic { get; set; }
+
+        public BlogStatus StatusID { get; set; }
+
+        public string Status { get; set; }
     }
 }
