@@ -79,6 +79,12 @@ public class ArtistConfiguration : IEntityTypeConfiguration<Artist>
             .HasForeignKey(a => a.ProfilePicID)
             .OnDelete(DeleteBehavior.SetNull);
 
+        builder.Property(a => a.LogoPicID).IsRequired(false);
+        builder.HasOne(a => a.LogoPic)
+            .WithMany()
+            .HasForeignKey(a => a.LogoPicID)
+            .OnDelete(DeleteBehavior.SetNull);
+
         builder.Property(a => a.GalleryID)
             .IsRequired(false);
 

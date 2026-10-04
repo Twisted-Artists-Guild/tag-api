@@ -53,6 +53,14 @@ namespace TAGWEBAPI.Models.Configurations
                 .IsRequired()
                 .HasDefaultValue(false);
 
+            builder.Property(v => v.LogoPicID)
+                .IsRequired(false);
+
+            builder.HasOne(v => v.LogoPic)
+                .WithMany()
+                .HasForeignKey(v => v.LogoPicID)
+                .OnDelete(DeleteBehavior.SetNull);
+
         }
     }
 }

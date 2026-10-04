@@ -130,6 +130,8 @@ namespace TAGWEBAPI.Data
 
         public DbSet<ListingImpression> ListingImpressions { get; set; }
 
+        public DbSet<LogoHistory> LogoHistory { get; set; }
+
         public DbSet<Contact> Contacts { get; set; }
 
         public DbSet<Linker_EntityToContact> Linker_EntityToContacts { get; set; }
@@ -223,6 +225,14 @@ namespace TAGWEBAPI.Data
             modelBuilder.ApplyConfiguration(new TAGWEBAPI.Models.Configurations.Contact.ContactConfiguration());
             modelBuilder.ApplyConfiguration(new TAGWEBAPI.Models.Configurations.LinkerEntityToContactConfiguration());
             modelBuilder.ApplyConfiguration(new TAGWEBAPI.Models.Configurations.UnifiedWorkflowConfiguration());
+            modelBuilder.Entity<LogoHistory>()
+                .HasOne(h => h.Picture)
+                .WithMany()
+                .HasForeignKey(h => h.PictureID)
+                .OnDelete(DeleteBehavior.Restrict);
+            modelBuilder.Entity<LogoHistory>()
+                .HasIndex(h => new { h.EntityType, h.EntityID, h.IsActive })
+                .HasDatabaseName("IX_LogoHistory_Entity_Active");
             modelBuilder.Entity<Conversation>().HasKey(c => c.Id);
             modelBuilder.Entity<ConversationParticipant>().HasKey(p => p.Id);
             modelBuilder.Entity<MessageAttachment>().HasKey(a => a.Id);

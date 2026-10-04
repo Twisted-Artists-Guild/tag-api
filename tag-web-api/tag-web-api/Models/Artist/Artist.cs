@@ -66,6 +66,11 @@ public class Artist
 
     public virtual Picture? ProfilePic { get; set; }
 
+    [ForeignKey("Picture")]
+    public int? LogoPicID { get; set; }
+
+    public virtual Picture? LogoPic { get; set; }
+
     public int? GalleryID { get; set; }
 
     public virtual Gallery? Gallery { get; set; }

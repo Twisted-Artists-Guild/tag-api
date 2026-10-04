@@ -41,6 +41,7 @@ public class ArtistController : ControllerBase
             .Where(a => a.IsPublished && !a.IsModerationBlocked)
             .Include(a => a.ProfilePic)
             .Include(a => a.CoverPic)
+            .Include(a => a.LogoPic)
             .Include(a => a.Listings)
                 .ThenInclude(l => l.CoverPic)
             .ToListAsync()
@@ -73,6 +74,7 @@ public class ArtistController : ControllerBase
             .Where(a => !a.IsPublished || a.IsModerationBlocked)
             .Include(a => a.ProfilePic)
             .Include(a => a.CoverPic)
+            .Include(a => a.LogoPic)
             .OrderByDescending(a => a.Applied)
             .ToListAsync()
             .ConfigureAwait(false);
@@ -90,6 +92,7 @@ public class ArtistController : ControllerBase
         var artist = await _context.Artists
             .Include(a => a.ProfilePic)
             .Include(a => a.CoverPic)
+            .Include(a => a.LogoPic)
             .Include(a => a.Gallery!)
                 .ThenInclude(g => g.GalleryItems)
                 .ThenInclude(gi => gi.Picture)
@@ -116,6 +119,7 @@ public class ArtistController : ControllerBase
             .AsNoTracking()
             .Include(a => a.ProfilePic)
             .Include(a => a.CoverPic)
+            .Include(a => a.LogoPic)
             .Include(a => a.Gallery!)
                 .ThenInclude(g => g.GalleryItems)
                 .ThenInclude(gi => gi.Picture)
@@ -257,6 +261,7 @@ public class ArtistController : ControllerBase
             .AsNoTracking()
             .Include(a => a.ProfilePic)
             .Include(a => a.CoverPic)
+            .Include(a => a.LogoPic)
             .FirstOrDefaultAsync(a => a.Path.ToLower() == normalizedSlug && a.IsPublished && !a.IsModerationBlocked)
             .ConfigureAwait(false);
 
@@ -367,6 +372,7 @@ public class ArtistController : ControllerBase
             },
             profilePic = artist.ProfilePic,
             coverPic = artist.CoverPic,
+            logoPic = artist.LogoPic,
             listings = listings.Select(MapListingSummaryForArtistProfileApi).ToList(),
             contactInfo = new
             {
@@ -405,6 +411,8 @@ public class ArtistController : ControllerBase
             artist.CoverPic,
             artist.ProfilePicID,
             artist.ProfilePic,
+            logoPicID = artist.LogoPicID,
+            logoPic = artist.LogoPic,
             artist.GalleryID,
             artist.Gallery,
             Listings = artist.Listings?.Select(MapListingSummaryForApi).ToList(),

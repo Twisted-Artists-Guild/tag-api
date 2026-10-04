@@ -57,6 +57,8 @@ public class Event
 
     public int? ProfilePicID { get; set; }
 
+    public int? LogoPicID { get; set; }
+
     public EventStatus StatusID { get; set; } = EventStatus.Draft;
 
     // Navigation properties
@@ -71,4 +73,6 @@ public class Event
     public Picture? CoverPic { get; set; }
 
     public Picture? ProfilePic { get; set; }
+
+    public Picture? LogoPic { get; set; }
 }

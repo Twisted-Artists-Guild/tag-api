@@ -38,6 +38,7 @@ namespace TAGWEBAPI.Controllers
                 .Where(e => e.StatusID == EventStatus.Published)
                 .Include(e => e.Artist)
                 .Include(e => e.Venue)
+                .Include(e => e.LogoPic)
                 .ToListAsync();
 
             return Ok(events.Select(MapEventForApi));
@@ -53,6 +54,7 @@ namespace TAGWEBAPI.Controllers
             var @event = await _context.Events
                 .Include(e => e.Artist)
                 .Include(e => e.Venue)
+                .Include(e => e.LogoPic)
                 .FirstOrDefaultAsync(e => e.EventID == id && e.StatusID != EventStatus.ModerationBlocked);
 
             if (@event == null)
@@ -73,6 +75,7 @@ namespace TAGWEBAPI.Controllers
             var @event = await _context.Events
                 .Include(e => e.Artist)
                 .Include(e => e.Venue)
+                .Include(e => e.LogoPic)
                 .FirstOrDefaultAsync(e => e.Path == path && e.StatusID == EventStatus.Published);
 
             if (@event == null)
@@ -289,12 +292,14 @@ namespace TAGWEBAPI.Controllers
                 @event.GalleryID,
                 @event.CoverPicID,
                 @event.ProfilePicID,
+                @event.LogoPicID,
                 @event.Artist,
                 @event.EventCategory,
                 @event.Venue,
                 @event.Gallery,
                 @event.CoverPic,
                 @event.ProfilePic,
+                @event.LogoPic,
                 @event.StatusID,
                 Status = @event.StatusID.ToString(),
             };
