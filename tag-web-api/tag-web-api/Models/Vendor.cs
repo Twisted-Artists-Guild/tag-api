@@ -39,4 +39,8 @@ public class Vendor
     public bool IsPublished { get; set; }
 
     public bool IsModerationBlocked { get; set; }
+
+    public int? LogoPicID { get; set; }
+
+    public virtual Picture? LogoPic { get; set; }
 }

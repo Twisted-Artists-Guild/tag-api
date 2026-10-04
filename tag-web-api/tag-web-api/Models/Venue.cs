@@ -25,6 +25,9 @@ public class Venue
     [ForeignKey("PhoneContact")]
     public int PhoneContactID { get; set; }
 
+    [ForeignKey("Picture")]
+    public int? LogoPicID { get; set; }
+
     public bool IsPublished { get; set; }
 
     public bool IsModerationBlocked { get; set; }
@@ -33,4 +36,5 @@ public class Venue
     public virtual Address Address { get; set; }
     public virtual ExternalLink ExternalLink { get; set; }
     public virtual PhoneContact PhoneContact { get; set; }
+    public virtual Picture? LogoPic { get; set; }
 }

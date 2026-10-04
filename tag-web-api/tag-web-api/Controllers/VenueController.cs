@@ -33,6 +33,7 @@ namespace TAGWEBAPI.Controllers
         {
             var venues = await this.context.Set<Venue>()
                 .Where(v => v.IsPublished && !v.IsModerationBlocked)
+                .Include(v => v.LogoPic)
                 .ToListAsync()
                 .ConfigureAwait(false);
 
@@ -49,6 +50,7 @@ namespace TAGWEBAPI.Controllers
 
             var venues = await this.context.Set<Venue>()
                 .Where(v => !v.IsPublished || v.IsModerationBlocked)
+                .Include(v => v.LogoPic)
                 .ToListAsync()
                 .ConfigureAwait(false);
 
@@ -58,7 +60,10 @@ namespace TAGWEBAPI.Controllers
         [HttpGet("{id}")]
         public async Task<ActionResult<Venue>> GetVenue(int id)
         {
-            var venue = await this.context.Set<Venue>().FindAsync(id).ConfigureAwait(false);
+            var venue = await this.context.Set<Venue>()
+                .Include(v => v.LogoPic)
+                .FirstOrDefaultAsync(v => v.VenueID == id)
+                .ConfigureAwait(false);
 
             if (venue == null || !venue.IsPublished || venue.IsModerationBlocked)
             {
@@ -71,7 +76,10 @@ namespace TAGWEBAPI.Controllers
         [HttpGet("byID/{id}")]
         public async Task<ActionResult<Venue>> GetVenueById(int id)
         {
-            var venue = await this.context.Set<Venue>().FindAsync(id).ConfigureAwait(false);
+            var venue = await this.context.Set<Venue>()
+                .Include(v => v.LogoPic)
+                .FirstOrDefaultAsync(v => v.VenueID == id)
+                .ConfigureAwait(false);
             if (venue == null)
             {
                 return this.NotFound();
@@ -135,6 +143,7 @@ namespace TAGWEBAPI.Controllers
 
             var venue = await this.context.Set<Venue>()
                 .AsNoTracking()
+                .Include(v => v.LogoPic)
                 .FirstOrDefaultAsync(v => v.VenueID == matchedVenueId.Value)
                 .ConfigureAwait(false);
 
@@ -468,6 +477,8 @@ namespace TAGWEBAPI.Controllers
                 venue.PhoneContactID,
                 venue.IsPublished,
                 venue.IsModerationBlocked,
+                venue.LogoPicID,
+                venue.LogoPic,
                 venue.Address,
                 venue.ExternalLink,
                 venue.PhoneContact,

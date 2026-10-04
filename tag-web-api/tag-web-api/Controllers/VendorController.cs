@@ -33,6 +33,7 @@ namespace TAGWEBAPI.Controllers
         {
             var vendors = await this.context.Set<Vendor>()
                 .Where(v => v.IsPublished && !v.IsModerationBlocked)
+                .Include(v => v.LogoPic)
                 .ToListAsync()
                 .ConfigureAwait(false);
 
@@ -49,6 +50,7 @@ namespace TAGWEBAPI.Controllers
 
             var vendors = await this.context.Set<Vendor>()
                 .Where(v => !v.IsPublished || v.IsModerationBlocked)
+                .Include(v => v.LogoPic)
                 .ToListAsync()
                 .ConfigureAwait(false);
 
@@ -58,7 +60,10 @@ namespace TAGWEBAPI.Controllers
         [HttpGet("{id}")]
         public async Task<ActionResult<Vendor>> GetVendor(int id)
         {
-            var vendor = await this.context.Set<Vendor>().FindAsync(id).ConfigureAwait(false);
+            var vendor = await this.context.Set<Vendor>()
+                .Include(v => v.LogoPic)
+                .FirstOrDefaultAsync(v => v.VendorID == id)
+                .ConfigureAwait(false);
 
             if (vendor == null || !vendor.IsPublished || vendor.IsModerationBlocked)
             {
@@ -71,7 +76,10 @@ namespace TAGWEBAPI.Controllers
         [HttpGet("byID/{id}")]
         public async Task<ActionResult<Vendor>> GetVendorById(int id)
         {
-            var vendor = await this.context.Set<Vendor>().FindAsync(id).ConfigureAwait(false);
+            var vendor = await this.context.Set<Vendor>()
+                .Include(v => v.LogoPic)
+                .FirstOrDefaultAsync(v => v.VendorID == id)
+                .ConfigureAwait(false);
             if (vendor == null)
             {
                 return this.NotFound();
@@ -135,6 +143,7 @@ namespace TAGWEBAPI.Controllers
 
             var vendor = await this.context.Set<Vendor>()
                 .AsNoTracking()
+                .Include(v => v.LogoPic)
                 .FirstOrDefaultAsync(v => v.VendorID == matchedVendorId.Value)
                 .ConfigureAwait(false);
 
@@ -464,6 +473,8 @@ namespace TAGWEBAPI.Controllers
                 vendor.POCPhone,
                 vendor.IsPublished,
                 vendor.IsModerationBlocked,
+                vendor.LogoPicID,
+                vendor.LogoPic,
             };
         }
 

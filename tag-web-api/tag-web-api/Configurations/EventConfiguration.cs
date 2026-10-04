@@ -62,6 +62,9 @@ public class EventConfiguration : IEntityTypeConfiguration<Event>
         builder.Property(e => e.ProfilePicID)
             .IsRequired(false);
 
+        builder.Property(e => e.LogoPicID)
+            .IsRequired(false);
+
         builder.HasIndex(e => e.Path)
             .IsUnique();
 
@@ -96,6 +99,12 @@ public class EventConfiguration : IEntityTypeConfiguration<Event>
         builder.HasOne(e => e.ProfilePic)
             .WithMany()
             .HasForeignKey(e => e.ProfilePicID)
+            .OnDelete(DeleteBehavior.SetNull)
+            .IsRequired(false);
+
+        builder.HasOne(e => e.LogoPic)
+            .WithMany()
+            .HasForeignKey(e => e.LogoPicID)
             .OnDelete(DeleteBehavior.SetNull)
             .IsRequired(false);
             
