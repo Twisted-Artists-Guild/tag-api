@@ -21,13 +21,13 @@ jobs:
       - name: Set up .NET Core
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '10.x'
+          dotnet-version: '9.x'
 
       - name: Build with dotnet
-        run: dotnet build --configuration Release
+        run: dotnet build tag-web-api/tag-web-api/tag-web-api.sln --configuration Release
 
       - name: dotnet publish
-        run: dotnet publish -c Release -o ${{env.DOTNET_ROOT}}/myapp
+        run: dotnet publish tag-web-api/tag-web-api/tag-web-api.csproj --configuration Release --output ${{ env.DOTNET_ROOT }}/myapp
 
       - name: Upload artifact for deployment job
         uses: actions/upload-artifact@v4
