@@ -53,6 +53,18 @@ public class EventConfiguration : IEntityTypeConfiguration<Event>
         builder.Property(e => e.EventCategoryID)
             .IsRequired(false);
 
+        builder.Property(e => e.GalleryID)
+            .IsRequired(false);
+
+        builder.Property(e => e.CoverPicID)
+            .IsRequired(false);
+
+        builder.Property(e => e.ProfilePicID)
+            .IsRequired(false);
+
+        builder.Property(e => e.LogoPicID)
+            .IsRequired(false);
+
         builder.HasIndex(e => e.Path)
             .IsUnique();
 
@@ -71,6 +83,30 @@ public class EventConfiguration : IEntityTypeConfiguration<Event>
             .WithMany()
             .HasForeignKey(e => e.EventCategoryID)
             .OnDelete(DeleteBehavior.SetNull);
+
+        builder.HasOne(e => e.Gallery)
+            .WithMany()
+            .HasForeignKey(e => e.GalleryID)
+            .OnDelete(DeleteBehavior.SetNull)
+            .IsRequired(false);
+
+        builder.HasOne(e => e.CoverPic)
+            .WithMany()
+            .HasForeignKey(e => e.CoverPicID)
+            .OnDelete(DeleteBehavior.SetNull)
+            .IsRequired(false);
+
+        builder.HasOne(e => e.ProfilePic)
+            .WithMany()
+            .HasForeignKey(e => e.ProfilePicID)
+            .OnDelete(DeleteBehavior.SetNull)
+            .IsRequired(false);
+
+        builder.HasOne(e => e.LogoPic)
+            .WithMany()
+            .HasForeignKey(e => e.LogoPicID)
+            .OnDelete(DeleteBehavior.SetNull)
+            .IsRequired(false);
             
         // Add seed data
         SeedData(builder);

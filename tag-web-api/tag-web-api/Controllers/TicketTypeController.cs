@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using TAGWEBAPI.Data;
@@ -7,6 +8,7 @@ namespace TAGWEBAPI.Controllers
 {
     [Route("api/[controller]")]
     [ApiController]
+    [Authorize]
     public class TicketTypeController : ControllerBase
     {
         private readonly TAGDBContext context;

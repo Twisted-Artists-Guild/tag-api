@@ -2,6 +2,7 @@
 // Copyright © Twisted Artists Guild. All rights reserved
 // </copyright>
 
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using TAGWEBAPI.Data;
@@ -11,6 +12,7 @@ namespace TAGWEBAPI.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
+[Authorize]
 public class ExternalLinkController : ControllerBase
 {
     private readonly TAGDBContext context;
@@ -23,13 +25,22 @@ public class ExternalLinkController : ControllerBase
     [HttpGet]
     public async Task<ActionResult<IEnumerable<ExternalLink>>> Get()
     {
-        return await this.context.Set<ExternalLink>().ToListAsync().ConfigureAwait(false);
+        return await this.context.Set<ExternalLink>()
+            .AsNoTracking()
+            .Include(el => el.LinkCategory)
+            .OrderBy(el => el.ExternalLinkID)
+            .ToListAsync()
+            .ConfigureAwait(false);
     }
 
     [HttpGet("{id}")]
     public async Task<ActionResult<ExternalLink>> Get(int id)
     {
-        var externalLink = await this.context.Set<ExternalLink>().FindAsync(id).ConfigureAwait(false);
+        var externalLink = await this.context.Set<ExternalLink>()
+            .AsNoTracking()
+            .Include(el => el.LinkCategory)
+            .FirstOrDefaultAsync(el => el.ExternalLinkID == id)
+            .ConfigureAwait(false);
         if (externalLink == null)
         {
             return this.NotFound();

@@ -4,6 +4,7 @@
 
 namespace TAGWEBAPI.Controllers
 {
+    using Microsoft.AspNetCore.Authorization;
     using Microsoft.AspNetCore.Mvc;
     using Microsoft.EntityFrameworkCore;
     using TAGWEBAPI.Data;
@@ -11,8 +12,10 @@ namespace TAGWEBAPI.Controllers
 
     [Route("api/[controller]")]
     [ApiController]
+    [Authorize]
     public class PhoneContactController : ControllerBase
     {
+        private const int DefaultLabelId = 2;
         private readonly TAGDBContext context;
 
         public PhoneContactController(TAGDBContext context)
@@ -24,14 +27,22 @@ namespace TAGWEBAPI.Controllers
         [HttpGet]
         public async Task<ActionResult<IEnumerable<PhoneContact>>> GetPhoneContacts()
         {
-            return await this.context.Set<PhoneContact>().ToListAsync().ConfigureAwait(false);
+            return await this.context.Set<PhoneContact>()
+                .Include(pc => pc.PhoneContactLabel)
+                .AsNoTracking()
+                .ToListAsync()
+                .ConfigureAwait(false);
         }
 
         // GET: api/PhoneContact/5
         [HttpGet("{id}")]
         public async Task<ActionResult<PhoneContact>> GetPhoneContact(int id)
         {
-            var phoneContact = await this.context.Set<PhoneContact>().FindAsync(id).ConfigureAwait(false);
+            var phoneContact = await this.context.Set<PhoneContact>()
+                .Include(pc => pc.PhoneContactLabel)
+                .AsNoTracking()
+                .FirstOrDefaultAsync(pc => pc.PhoneContactID == id)
+                .ConfigureAwait(false);
 
             if (phoneContact == null)
             {
@@ -45,6 +56,11 @@ namespace TAGWEBAPI.Controllers
         [HttpPost]
         public async Task<ActionResult<PhoneContact>> PostPhoneContact(PhoneContact phoneContact)
         {
+            if (phoneContact.PhoneContactLabelID <= 0)
+            {
+                phoneContact.PhoneContactLabelID = DefaultLabelId;
+            }
+
             this.context.Set<PhoneContact>().Add(phoneContact);
             await this.context.SaveChangesAsync().ConfigureAwait(false);
 
@@ -58,6 +74,11 @@ namespace TAGWEBAPI.Controllers
             if (id != phoneContact.PhoneContactID)
             {
                 return this.BadRequest();
+            }
+
+            if (phoneContact.PhoneContactLabelID <= 0)
+            {
+                phoneContact.PhoneContactLabelID = DefaultLabelId;
             }
 
             this.context.Entry(phoneContact).State = EntityState.Modified;

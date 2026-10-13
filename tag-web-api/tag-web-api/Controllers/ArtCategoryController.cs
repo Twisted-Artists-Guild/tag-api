@@ -2,10 +2,11 @@
 // Copyright © Twisted Artists Guild. All rights reserved
 // </copyright>
 
-using System.Collections.Generic;
-using System.Linq;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System.Collections.Generic;
+using System.Linq;
 using TAGWEBAPI.Data;
 using TAGWEBAPI.Models;
 
@@ -13,6 +14,7 @@ namespace TAGWEBAPI.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
+[Authorize]
 public class ArtCategoryController : ControllerBase
 {
     private readonly TAGDBContext context;
@@ -23,6 +25,7 @@ public class ArtCategoryController : ControllerBase
     }
 
     [HttpGet(Name = "GetArtCategories")]
+    [AllowAnonymous]
     public async Task<ActionResult<IEnumerable<ArtCategoryFlatDto>>> Get()
     {
         var categories = await this.context.Set<ArtCategory>()
@@ -44,6 +47,7 @@ public class ArtCategoryController : ControllerBase
     }
 
     [HttpGet("roots")]
+    [AllowAnonymous]
     public async Task<ActionResult<IEnumerable<ArtCategoryFlatDto>>> GetRoots()
     {
         var roots = await this.context.Set<ArtCategory>()
@@ -66,6 +70,7 @@ public class ArtCategoryController : ControllerBase
     }
 
     [HttpGet("tree")]
+    [AllowAnonymous]
     public async Task<ActionResult<IEnumerable<ArtCategoryTreeNodeDto>>> GetTree()
     {
         var categories = await this.context.Set<ArtCategory>()
@@ -104,6 +109,7 @@ public class ArtCategoryController : ControllerBase
     }
 
     [HttpGet("getByID/{id}")]
+    [AllowAnonymous]
     public async Task<ActionResult<ArtCategoryFlatDto>> Get(int id)
     {
         var artCategory = await this.context.Set<ArtCategory>()
@@ -130,6 +136,7 @@ public class ArtCategoryController : ControllerBase
     }
 
     [HttpGet("{category}")]
+    [AllowAnonymous]
     public IActionResult GetArtCategoryByCategory(string category)
     {
         var artCategory = this.context.Set<ArtCategory>()

@@ -4,6 +4,7 @@
 
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
 
 namespace TAGWEBAPI.Models;
 
@@ -17,16 +18,20 @@ public class ExternalLink
 
     [StringLength(1000)]
     public string? URL { get; set; }
-    
+
     [StringLength(255)]
     public string? Description { get; set; }
-    
+
     [StringLength(100)]
     public string? Handle { get; set; }
-    
-    [StringLength(100)]
-    public string? ServiceName { get; set; }
 
-    // Navigation property - contacts using this link
-    public virtual ICollection<Linker_UserAndArtistToContact> Contacts { get; set; } = new List<Linker_UserAndArtistToContact>();
+    public int? ContactLabelID { get; set; }
+
+    public int? LinkCategoryID { get; set; }
+
+    [ForeignKey("LinkCategoryID")]
+    public virtual LinkCategory? LinkCategory { get; set; }
+
+    [ForeignKey("ContactLabelID")]
+    public virtual ContactLabel? ContactLabel { get; set; }
 }

@@ -1,9 +1,10 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using TAGWEBAPI.Models;
-using TAGWEBAPI.Data;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using TAGWEBAPI.Data;
+using TAGWEBAPI.Models;
 
 namespace TAGWEBAPI.Controllers
 {
@@ -12,6 +13,7 @@ namespace TAGWEBAPI.Controllers
     /// </summary>
     [Route("api/[controller]")]
     [ApiController]
+    [Authorize]
     public class Utility_SearchController : ControllerBase
     {
         private readonly TAGDBContext _context;

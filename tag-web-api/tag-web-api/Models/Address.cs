@@ -4,6 +4,7 @@
 
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
 
 namespace TAGWEBAPI.Models;
 
@@ -17,7 +18,7 @@ public class Address
 
     [StringLength(255)]
     public string? AddressLine2 { get; set; }
-    
+
     public string? AddressLine3 { get; set; }
 
     public string? AddressLine4 { get; set; }
@@ -35,11 +36,13 @@ public class Address
     public string? Country { get; set; }
 
     [StringLength(100)]
-    public string Region { get; set; }
+    public string? Region { get; set; }
 
     [StringLength(1000)]
     public string? OperationHours { get; set; }
 
-    // Navigation property - contacts using this address
-    public virtual ICollection<Linker_UserAndArtistToContact> Contacts { get; set; } = new List<Linker_UserAndArtistToContact>();
+    public int? ContactLabelID { get; set; }
+
+    [ForeignKey("ContactLabelID")]
+    public ContactLabel? ContactLabel { get; set; }
 }

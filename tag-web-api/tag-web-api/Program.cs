@@ -2,10 +2,19 @@
 // Copyright © Twisted Artists Guild. All rights reserved
 // </copyright>
 
+using System.Text;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.IdentityModel.Tokens;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Hosting;
+using Microsoft.AspNetCore.DataProtection;
 using TAGWEBAPI.Data;
+using TAGWEBAPI.Integrations.ModernTreasury;
 using TAGWEBAPI.Models;
+using TAGWEBAPI.Hubs;
+using Microsoft.AspNetCore.SignalR;
+using Microsoft.OpenApi.Models;
+using TAGWEBAPI.Services;
 
 Console.WriteLine("========================================");
 Console.WriteLine("Setting Up TAG WEB API...");
@@ -16,8 +25,9 @@ var textprefix = "==--->>>|";
 var builder = WebApplication.CreateBuilder(args);
 
 // Retrieve the Application Insights connection string from the environment variable
+// Skip entirely in Development to keep the debug console readable
 var appInsightsConnectionString = builder.Configuration.GetConnectionString("appinsights");
-if (!string.IsNullOrEmpty(appInsightsConnectionString))
+if (!builder.Environment.IsDevelopment() && !string.IsNullOrEmpty(appInsightsConnectionString))
 {
     // Register Application Insights carefully - failures during design-time (dotnet-ef)
     // or mismatched package/tooling versions can throw when listeners are attached.
@@ -32,6 +42,10 @@ if (!string.IsNullOrEmpty(appInsightsConnectionString))
         Console.WriteLine(textprefix + "Could not enable Application Insights telemetry. Continuing without it.");
         Console.WriteLine("Telemetry registration error: " + aiEx.Message);
     }
+}
+else if (builder.Environment.IsDevelopment())
+{
+    Console.WriteLine(textprefix + "Application Insights skipped in Development environment.");
 }
 else
 {
@@ -53,16 +67,138 @@ else
 }
 
 // Add services to the container.
-builder.Services.AddControllers();
-Console.WriteLine(textprefix + "Controllers added to the service container.");
+builder.Services.AddControllers()
+    .AddJsonOptions(options =>
+    {
+        // THIS PREVENTS OBJECT CYCLE CRASHES GLOBALLY
+        options.JsonSerializerOptions.ReferenceHandler = System.Text.Json.Serialization.ReferenceHandler.IgnoreCycles;
+    });
+Console.WriteLine(textprefix + "Controllers added to the service container (CamelCase naming policy configured).");
 
 builder.Services.AddDbContext<TAGDBContext>(options =>
     options.UseNpgsql(dbConnectionString));
 Console.WriteLine(textprefix + "Database context configured with PostgreSQL.");
 
+Microsoft.IdentityModel.Logging.IdentityModelEventSource.ShowPII = true;
+
+// ==========================================
+// 1. ADD JWT AUTHENTICATION FOR NEXTAUTH 
+// ==========================================
+var nextAuthSecret = builder.Configuration["NextAuthSecret"]; // (reference env.local) -> dotnet user-secrets set NextAuthSecret XXXX 
+
+if (string.IsNullOrEmpty(nextAuthSecret))
+{
+    Console.WriteLine("========================================");
+    Console.WriteLine("WARNING: Configuration value 'NextAuthSecret' is not set. JWT authentication will not be configured; [Authorize] endpoints will fail.");
+    Console.WriteLine("========================================");
+}
+else
+{
+    builder.Services.AddAuthentication(options =>
+    {
+        options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
+        options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
+    })
+    .AddJwtBearer(options =>
+    {
+        var keyBytes = Encoding.UTF8.GetBytes(nextAuthSecret);
+        var signingKey = new SymmetricSecurityKey(keyBytes);
+        signingKey.KeyId = "nextauth-key";
+
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuerSigningKey = true,
+            IssuerSigningKey = signingKey,
+            IssuerSigningKeyResolver = (tokenString, securityToken, kid, parameters) =>
+            {
+                return new[] { signingKey };
+            },
+            
+            ValidateIssuer = false,
+            ValidateAudience = false,
+            ValidateLifetime = true,
+            ClockSkew = TimeSpan.FromMinutes(5),
+            RequireSignedTokens = true,
+        };
+
+        options.Events = new JwtBearerEvents
+        {
+            OnMessageReceived = context =>
+            {
+                // First check native Header authorization (for Swagger testing)
+                var headerAuth = context.Request.Headers["Authorization"].FirstOrDefault();
+                if (!string.IsNullOrEmpty(headerAuth) && headerAuth.StartsWith("Bearer "))
+                {
+                    context.Token = headerAuth.Substring("Bearer ".Length).Trim();
+                    return Task.CompletedTask;
+                }
+
+                // If no header, grab from proxy cookies (For live React application)
+                var token = context.Request.Cookies["next-auth.session-token"] 
+                         ?? context.Request.Cookies["__Secure-next-auth.session-token"];
+                         
+                if (!string.IsNullOrEmpty(token))
+                {
+                    context.Token = token;
+                }
+                return Task.CompletedTask;
+            },
+        };
+    });
+}
+// ==========================================
+
+builder.Services.Configure<ModernTreasuryOptions>(
+    builder.Configuration.GetSection(ModernTreasuryOptions.SectionName));
+
+builder.Services.AddHttpClient<IModernTreasuryLedgerService, ModernTreasuryLedgerService>(client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(30);
+});
+Console.WriteLine(textprefix + "Modern Treasury ledger service configured.");
+
+builder.Services.AddSingleton<PricingCalculatorService>();
+Console.WriteLine(textprefix + "Pricing calculator service configured.");
+
+
+// Ensure Data Protection services are registered for server-side envelope protection (messages)
+builder.Services.AddDataProtection();
+Console.WriteLine(textprefix + "Data Protection services registered.");
+
+// Register SignalR
+builder.Services.AddSignalR();
+Console.WriteLine(textprefix + "SignalR services registered.");
+
 // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
+// Configure Swagger to accept Bearer tokens
 builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen();
+builder.Services.AddSwaggerGen(c =>
+{
+    c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
+    {
+        Name = "Authorization",
+        Type = SecuritySchemeType.Http,
+        Scheme = "Bearer",
+        BearerFormat = "JWT",
+        In = ParameterLocation.Header,
+        Description = "Paste your NextAuth token here to test secured APIs. Do NOT type 'Bearer ' before the token, just paste the raw token string."
+    });
+
+    c.AddSecurityRequirement(new OpenApiSecurityRequirement
+    {
+        {
+            new OpenApiSecurityScheme
+            {
+                Reference = new OpenApiReference
+                {
+                    Type = ReferenceType.SecurityScheme,
+                    Id = "Bearer"
+                }
+            },
+            Array.Empty<string>()
+        }
+    });
+});
 
 // Define a named CORS policy
 builder.Services.AddCors(options =>
@@ -118,12 +254,17 @@ try
         app.UseHttpsRedirection();
     }
 
+    // Serve static files (e.g. uploaded attachments under wwwroot/uploads/messages)
+    app.UseStaticFiles();
+    Console.WriteLine(textprefix + "Static file middleware enabled (wwwroot).");
+
+    // MAKE SURE USE_AUTHENTICATION IS ADDED BEFORE USE_AUTHORIZATION
+    app.UseAuthentication(); // <-- ADD THIS LINE
     app.UseAuthorization();
-
-    // Map the default API call to return "Hello World!"
-    app.MapGet("/api/", () => "Hello World!");
-
+    
     app.MapControllers();
+    // Map messaging hub
+    app.MapHub<MessagingHub>("/hubs/messaging");
 
     Console.WriteLine("========================================");
     Console.WriteLine("TAG WEB API is starting: app.run()");

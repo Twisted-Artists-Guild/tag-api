@@ -48,6 +48,24 @@ public class BlogConfiguration : IEntityTypeConfiguration<Blog>
             .HasForeignKey(b => b.UserID)
             .OnDelete(DeleteBehavior.SetNull);
 
+        builder.Property(b => b.GalleryID)
+            .IsRequired(false);
+
+        builder.HasOne(b => b.Gallery)
+            .WithMany()
+            .HasForeignKey(b => b.GalleryID)
+            .OnDelete(DeleteBehavior.SetNull)
+            .IsRequired(false);
+
+        builder.Property(b => b.CoverPicID)
+            .IsRequired(false);
+
+        builder.HasOne(b => b.CoverPic)
+            .WithMany()
+            .HasForeignKey(b => b.CoverPicID)
+            .OnDelete(DeleteBehavior.SetNull)
+            .IsRequired(false);
+
         SeedData(builder);
     }
 
