@@ -22,10 +22,13 @@ namespace TAGWEBAPI.Models.Configurations
                 .IsRequired();
 
             builder.Property(v => v.ExternalLinkID)
-                .IsRequired();
+                .IsRequired(false);
 
             builder.Property(v => v.PhoneContactID)
-                .IsRequired();
+                .IsRequired(false);
+
+            builder.Property(v => v.EventSourceUrl)
+                .HasMaxLength(Venue.EventSourceUrlMaxLength);
 
             builder.Property(v => v.LogoPicID)
                 .IsRequired(false);
