@@ -19,6 +19,7 @@ namespace TAGWEBAPI.Controllers
     public class VenueController : ControllerBase
     {
         private static readonly Regex ValidSlugRegex = new Regex(@"^[a-z0-9](?:[a-z0-9\-]*[a-z0-9])?$", RegexOptions.Compiled);
+        private const int DescriptionMaxLength = 20000;
         private readonly TAGDBContext context;
         private readonly ILogger<VenueController> logger;
 
@@ -195,30 +196,14 @@ namespace TAGWEBAPI.Controllers
                 OperationHours = string.Empty,
             };
 
-            var link = new ExternalLink
-            {
-                URL = "https://example.com",
-                Description = "Pending venue website",
-                Handle = normalizedSlug,
-            };
-
-            var phone = new PhoneContact
-            {
-                PhoneNumber = "000-000-0000",
-                Description = "Pending venue phone",
-            };
-
             this.context.Set<Address>().Add(address);
-            this.context.Set<ExternalLink>().Add(link);
-            this.context.Set<PhoneContact>().Add(phone);
             await this.context.SaveChangesAsync().ConfigureAwait(false);
 
+            // No placeholder website or phone: both are optional and are added later through the contacts workflow.
             var venue = new Venue
             {
                 Name = displayTitle,
                 AddressID = address.AddressID,
-                ExternalLinkID = link.ExternalLinkID,
-                PhoneContactID = phone.PhoneContactID,
                 IsPublished = false,
                 IsModerationBlocked = false,
             };
@@ -299,6 +284,12 @@ namespace TAGWEBAPI.Controllers
                 return this.BadRequest();
             }
 
+            var validationError = ValidateVenueFields(venue);
+            if (validationError != null)
+            {
+                return this.BadRequest(validationError);
+            }
+
             this.context.Set<Venue>().Add(venue);
             await this.context.SaveChangesAsync().ConfigureAwait(false);
 
@@ -322,6 +313,12 @@ namespace TAGWEBAPI.Controllers
             if (id != venue.VenueID)
             {
                 return this.BadRequest();
+            }
+
+            var validationError = ValidateVenueFields(venue);
+            if (validationError != null)
+            {
+                return this.BadRequest(validationError);
             }
 
             this.context.Entry(venue).State = EntityState.Modified;
@@ -465,6 +462,43 @@ namespace TAGWEBAPI.Controllers
                 .ConfigureAwait(false);
         }
 
+        // Normalizes and validates the optional venue fields; returns an error message, or null when valid.
+        private static string? ValidateVenueFields(Venue venue)
+        {
+            if (venue.AddressID <= 0)
+            {
+                return "AddressID is required and must reference an existing address.";
+            }
+
+            var eventSourceUrl = venue.EventSourceUrl?.Trim();
+            if (string.IsNullOrEmpty(eventSourceUrl))
+            {
+                venue.EventSourceUrl = null;
+            }
+            else
+            {
+                if (eventSourceUrl.Length > Venue.EventSourceUrlMaxLength)
+                {
+                    return $"EventSourceUrl must be at most {Venue.EventSourceUrlMaxLength} characters.";
+                }
+
+                if (!Uri.TryCreate(eventSourceUrl, UriKind.Absolute, out var uri)
+                    || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
+                {
+                    return "EventSourceUrl must be an absolute http or https URL.";
+                }
+
+                venue.EventSourceUrl = eventSourceUrl;
+            }
+
+            if (venue.Description != null && venue.Description.Length > DescriptionMaxLength)
+            {
+                return $"Description must be at most {DescriptionMaxLength} characters.";
+            }
+
+            return null;
+        }
+
         private static object MapVenueForApi(Venue venue)
         {
             return new
@@ -472,6 +506,9 @@ namespace TAGWEBAPI.Controllers
                 venue.VenueID,
                 Name = CoalescePlaintext(venue.Name_Plaintext, venue.Name),
                 NameRichtext = venue.Name,
+                Description = CoalescePlaintext(venue.Description_Plaintext, venue.Description),
+                DescriptionRichtext = venue.Description,
+                venue.EventSourceUrl,
                 venue.AddressID,
                 venue.ExternalLinkID,
                 venue.PhoneContactID,
