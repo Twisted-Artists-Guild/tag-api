@@ -43,8 +43,9 @@ public class Venue
 
     public bool IsModerationBlocked { get; set; }
 
-    // Navigation properties
-    public virtual Address Address { get; set; }
+    // Navigation properties. Nullable so request bodies that only carry the foreign key IDs pass model validation;
+    // AddressID above is still required, so a venue always has an address.
+    public virtual Address? Address { get; set; }
     public virtual ExternalLink? ExternalLink { get; set; }
     public virtual PhoneContact? PhoneContact { get; set; }
     public virtual Picture? LogoPic { get; set; }

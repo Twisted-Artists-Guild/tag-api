@@ -465,6 +465,11 @@ namespace TAGWEBAPI.Controllers
         // Normalizes and validates the optional venue fields; returns an error message, or null when valid.
         private static string? ValidateVenueFields(Venue venue)
         {
+            if (venue.AddressID <= 0)
+            {
+                return "AddressID is required and must reference an existing address.";
+            }
+
             var eventSourceUrl = venue.EventSourceUrl?.Trim();
             if (string.IsNullOrEmpty(eventSourceUrl))
             {

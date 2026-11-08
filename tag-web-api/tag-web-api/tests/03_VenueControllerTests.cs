@@ -189,6 +189,53 @@ public class VenueControllerTests
         Assert.Equal("https://example.com/calendar", saved.EventSourceUrl);
     }
 
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    public async Task PutVenue_MissingAddressId_ReturnsBadRequestInsteadOfFailingInTheDatabase(int addressId)
+    {
+        var options = CreateOptions($"{nameof(PutVenue_MissingAddressId_ReturnsBadRequestInsteadOfFailingInTheDatabase)}-{addressId}");
+        await SeedAsync(options, new Venue { VenueID = 1, Name = "Hall", AddressID = AddressId });
+        await using var context = new TAGDBContext(options);
+
+        var result = await CreateController(context).PutVenue(1, new Venue { VenueID = 1, Name = "Renamed", AddressID = addressId });
+
+        Assert.IsType<BadRequestObjectResult>(result);
+        await using var verify = new TAGDBContext(options);
+        var stored = await verify.Set<Venue>().SingleAsync();
+        Assert.Equal("Hall", stored.Name);
+        Assert.Equal(AddressId, stored.AddressID);
+    }
+
+    [Fact]
+    public async Task PostVenue_MissingAddressId_ReturnsBadRequest()
+    {
+        var options = CreateOptions(nameof(PostVenue_MissingAddressId_ReturnsBadRequest));
+        await using var context = new TAGDBContext(options);
+
+        var result = await CreateController(context).PostVenue(new Venue { Name = "No Address Hall", AddressID = 0 });
+
+        Assert.IsType<BadRequestObjectResult>(result.Result);
+        Assert.Empty(context.Set<Venue>());
+    }
+
+    // The wizard saves with PUT /api/venue/{id} and sends only foreign key IDs, never nested objects.
+    // With nullable reference types enabled, a non-nullable navigation property is implicitly required
+    // by model validation and the request fails with 400 ("The Address field is required.").
+    [Fact]
+    public void Venue_NavigationProperties_AreNullableSoIdOnlyRequestsPassValidation()
+    {
+        var nullability = new System.Reflection.NullabilityInfoContext();
+        foreach (var name in new[] { nameof(Venue.Address), nameof(Venue.ExternalLink), nameof(Venue.PhoneContact), nameof(Venue.LogoPic) })
+        {
+            var property = typeof(Venue).GetProperty(name)!;
+            Assert.Equal(System.Reflection.NullabilityState.Nullable, nullability.Create(property).WriteState);
+        }
+
+        // The address is still mandatory through its foreign key.
+        Assert.Equal(typeof(int), typeof(Venue).GetProperty(nameof(Venue.AddressID))!.PropertyType);
+    }
+
     [Fact]
     public async Task ReserveVenueSlug_DoesNotCreatePlaceholderWebsiteOrPhone()
     {
