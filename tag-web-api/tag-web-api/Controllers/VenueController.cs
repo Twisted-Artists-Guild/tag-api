@@ -211,19 +211,17 @@ namespace TAGWEBAPI.Controllers
                 OperationHours = string.Empty,
             };
 
-            this.context.Set<Address>().Add(address);
-            await this.context.SaveChangesAsync().ConfigureAwait(false);
-
             // No placeholder website or phone: both are optional and are added later through the contacts workflow.
+            // The address, the venue and the creator's owner link are saved in a single SaveChanges, so a failure
+            // cannot leave an orphaned address or an ownerless venue behind.
             var venue = new Venue
             {
                 Name = displayTitle,
-                AddressID = address.AddressID,
+                Address = address,
                 IsPublished = false,
                 IsModerationBlocked = false,
             };
 
-            // The creator becomes the owner; the venue and its owner link are saved together.
             this.context.Set<Venue>().Add(venue);
             this.context.Set<Linker_UserToVenue>().Add(new Linker_UserToVenue
             {

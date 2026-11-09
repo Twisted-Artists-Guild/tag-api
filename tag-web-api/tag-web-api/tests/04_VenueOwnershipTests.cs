@@ -316,6 +316,11 @@ public class VenueOwnershipTests
         Assert.Equal(OwnerId, link.UserID);
         Assert.Equal(venue.VenueID, link.VenueID);
         Assert.Equal(Linker_UserToVenue.OwnerRole, link.Role);
+
+        // The address is created together with the venue and the two are connected.
+        var address = await context.Set<Address>().SingleAsync();
+        Assert.Equal(address.AddressID, venue.AddressID);
+        Assert.Equal("Pending venue address", address.AddressLine1);
     }
 
     [Fact]
