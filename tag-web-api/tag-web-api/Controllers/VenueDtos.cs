@@ -37,4 +37,57 @@ namespace TAGWEBAPI.Controllers
         // Only staff may change this; a value that differs from the stored one is rejected for everyone else.
         public bool? IsModerationBlocked { get; set; }
     }
+
+    public class VenueOwnerAssignRequest
+    {
+        public int UserID { get; set; }
+    }
+
+    /// <summary>A user who manages a venue. Only the fields staff need to tell users apart are exposed.</summary>
+    public class VenueOwnerDto
+    {
+        public int UserID { get; set; }
+
+        public string DisplayName { get; set; } = string.Empty;
+
+        public string? Username { get; set; }
+
+        public string? Email { get; set; }
+
+        public string Role { get; set; } = string.Empty;
+    }
+
+    public class VenueAdminRowDto
+    {
+        public int VenueID { get; set; }
+
+        public string Name { get; set; } = string.Empty;
+
+        public string Slug { get; set; } = string.Empty;
+
+        public bool IsPublished { get; set; }
+
+        public bool IsModerationBlocked { get; set; }
+
+        public List<VenueOwnerDto> Owners { get; set; } = new();
+    }
+
+    /// <summary>One page of venues for the staff screen; NextAfterId is the cursor for the next page, or null at the end.</summary>
+    public class VenueAdminPageDto
+    {
+        public List<VenueAdminRowDto> Items { get; set; } = new();
+
+        public int? NextAfterId { get; set; }
+    }
+
+    public class UserLookupDto
+    {
+        public int UserID { get; set; }
+
+        public string DisplayName { get; set; } = string.Empty;
+
+        public string? Username { get; set; }
+
+        public string? Email { get; set; }
+    }
 }

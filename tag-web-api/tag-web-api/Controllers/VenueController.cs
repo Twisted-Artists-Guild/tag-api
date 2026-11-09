@@ -656,7 +656,7 @@ namespace TAGWEBAPI.Controllers
             };
         }
 
-        private static string? CoalescePlaintext(string? plaintext, string? richtext)
+        internal static string? CoalescePlaintext(string? plaintext, string? richtext)
         {
             return !string.IsNullOrWhiteSpace(plaintext)
                 ? plaintext
