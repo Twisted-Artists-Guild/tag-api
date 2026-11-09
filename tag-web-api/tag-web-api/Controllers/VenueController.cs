@@ -20,6 +20,8 @@ namespace TAGWEBAPI.Controllers
     {
         private static readonly Regex ValidSlugRegex = new Regex(@"^[a-z0-9](?:[a-z0-9\-]*[a-z0-9])?$", RegexOptions.Compiled);
         private const int DescriptionMaxLength = 20000;
+        private const int VenueNameMaxLength = 1000;
+        private const string AddressNotFoundMessage = "AddressID is required and must reference an existing address.";
         private readonly TAGDBContext context;
         private readonly ILogger<VenueController> logger;
 
@@ -42,11 +44,18 @@ namespace TAGWEBAPI.Controllers
         }
 
         [HttpGet("admin/unpublished")]
-        public async Task<ActionResult<IEnumerable<Venue>>> GetUnpublishedVenues([FromQuery] int moderatorUserId)
+        public async Task<ActionResult<IEnumerable<Venue>>> GetUnpublishedVenues()
         {
-            if (!await this.IsModeratorAsync(moderatorUserId).ConfigureAwait(false))
+            // Staff status comes from the token; a user id supplied by the caller is never trusted.
+            var userId = VenueAccess.GetUserId(this.User);
+            if (userId == null)
             {
-                return this.Forbid();
+                return this.Unauthorized();
+            }
+
+            if (!await VenueAccess.IsStaffAsync(this.context, userId.Value).ConfigureAwait(false))
+            {
+                return this.StatusCode(StatusCodes.Status403Forbidden, new { message = "Only staff can list unpublished venues." });
             }
 
             var venues = await this.context.Set<Venue>()
@@ -81,7 +90,7 @@ namespace TAGWEBAPI.Controllers
                 .Include(v => v.LogoPic)
                 .FirstOrDefaultAsync(v => v.VenueID == id)
                 .ConfigureAwait(false);
-            if (venue == null)
+            if (venue == null || !await this.CanViewVenueAsync(venue).ConfigureAwait(false))
             {
                 return this.NotFound();
             }
@@ -148,7 +157,7 @@ namespace TAGWEBAPI.Controllers
                 .FirstOrDefaultAsync(v => v.VenueID == matchedVenueId.Value)
                 .ConfigureAwait(false);
 
-            if (venue == null)
+            if (venue == null || !await this.CanViewVenueAsync(venue).ConfigureAwait(false))
             {
                 return this.NotFound();
             }
@@ -170,6 +179,12 @@ namespace TAGWEBAPI.Controllers
             if (!this.ModelState.IsValid)
             {
                 return this.BadRequest(this.ModelState);
+            }
+
+            var userId = VenueAccess.GetUserId(this.User);
+            if (userId == null)
+            {
+                return this.Unauthorized();
             }
 
             var normalizedSlug = NormalizeSlug(request.Slug);
@@ -196,25 +211,31 @@ namespace TAGWEBAPI.Controllers
                 OperationHours = string.Empty,
             };
 
-            this.context.Set<Address>().Add(address);
-            await this.context.SaveChangesAsync().ConfigureAwait(false);
-
             // No placeholder website or phone: both are optional and are added later through the contacts workflow.
+            // The address, the venue and the creator's owner link are saved in a single SaveChanges, so a failure
+            // cannot leave an orphaned address or an ownerless venue behind.
             var venue = new Venue
             {
                 Name = displayTitle,
-                AddressID = address.AddressID,
+                Address = address,
                 IsPublished = false,
                 IsModerationBlocked = false,
             };
 
             this.context.Set<Venue>().Add(venue);
+            this.context.Set<Linker_UserToVenue>().Add(new Linker_UserToVenue
+            {
+                UserID = userId.Value,
+                Venue = venue,
+                Role = Linker_UserToVenue.OwnerRole,
+            });
             await this.context.SaveChangesAsync().ConfigureAwait(false);
 
             await this.TryWriteAuditLogAsync(
                 shortText: "Venue slug reserved",
                 tags: "scope=audit;entity=venue;event=slug;operation=reserve;result=success;channel=db",
-                loggedData: $"venueId={venue.VenueID};slug={ToSlug(venue.Name)}")
+                loggedData: $"venueId={venue.VenueID};slug={ToSlug(venue.Name)};ownerUserId={userId.Value}",
+                userId: userId)
                 .ConfigureAwait(false);
 
             return this.CreatedAtAction(nameof(this.GetVenueById), new { id = venue.VenueID }, new VenueSlugReservationResponse
@@ -242,10 +263,21 @@ namespace TAGWEBAPI.Controllers
                 return this.BadRequest(this.ModelState);
             }
 
+            var userId = VenueAccess.GetUserId(this.User);
+            if (userId == null)
+            {
+                return this.Unauthorized();
+            }
+
             var venue = await this.context.Set<Venue>().FindAsync(id).ConfigureAwait(false);
             if (venue == null)
             {
                 return this.NotFound(new { message = $"Venue with ID {id} not found" });
+            }
+
+            if (!await VenueAccess.CanManageAsync(this.context, id, userId.Value).ConfigureAwait(false))
+            {
+                return this.Forbidden("You are not allowed to change this venue.");
             }
 
             var normalizedSlug = NormalizeSlug(request.Slug);
@@ -277,61 +309,126 @@ namespace TAGWEBAPI.Controllers
         }
 
         [HttpPost]
-        public async Task<ActionResult<Venue>> PostVenue(Venue venue)
+        public async Task<ActionResult<Venue>> PostVenue([FromBody] VenueCreateRequest request)
         {
-            if (venue == null)
+            if (request == null)
             {
                 return this.BadRequest();
             }
 
-            var validationError = ValidateVenueFields(venue);
+            var userId = VenueAccess.GetUserId(this.User);
+            if (userId == null)
+            {
+                return this.Unauthorized();
+            }
+
+            var validationError = ValidateVenueRequest(request);
             if (validationError != null)
             {
                 return this.BadRequest(validationError);
             }
 
+            if (!await this.AddressExistsAsync(request.AddressID).ConfigureAwait(false))
+            {
+                return this.BadRequest(AddressNotFoundMessage);
+            }
+
+            // A venue is created unpublished and unblocked; the creator becomes its owner.
+            var venue = new Venue
+            {
+                Name = request.Name!.Trim(),
+                AddressID = request.AddressID,
+                ExternalLinkID = request.ExternalLinkID,
+                PhoneContactID = request.PhoneContactID,
+                Description = request.Description,
+                EventSourceUrl = request.EventSourceUrl,
+                IsPublished = false,
+                IsModerationBlocked = false,
+            };
+
             this.context.Set<Venue>().Add(venue);
+            this.context.Set<Linker_UserToVenue>().Add(new Linker_UserToVenue
+            {
+                UserID = userId.Value,
+                Venue = venue,
+                Role = Linker_UserToVenue.OwnerRole,
+            });
             await this.context.SaveChangesAsync().ConfigureAwait(false);
 
             await this.TryWriteAuditLogAsync(
                 shortText: "Venue created",
                 tags: "scope=audit;entity=venue;event=profile;operation=create;result=success;channel=db",
-                loggedData: $"venueId={venue.VenueID};name={venue.Name}")
+                loggedData: $"venueId={venue.VenueID};name={venue.Name};ownerUserId={userId.Value}",
+                userId: userId)
                 .ConfigureAwait(false);
 
-            return this.CreatedAtAction(nameof(this.GetVenue), new { id = venue.VenueID }, venue);
+            return this.CreatedAtAction(nameof(this.GetVenueById), new { id = venue.VenueID }, MapVenueForApi(venue));
         }
 
         [HttpPut("{id}")]
-        public async Task<IActionResult> PutVenue(int id, Venue venue)
+        public async Task<IActionResult> PutVenue(int id, [FromBody] VenueUpdateRequest request)
         {
+            if (request == null || id != request.VenueID)
+            {
+                return this.BadRequest();
+            }
+
+            var userId = VenueAccess.GetUserId(this.User);
+            if (userId == null)
+            {
+                return this.Unauthorized();
+            }
+
+            var venue = await this.context.Set<Venue>().FirstOrDefaultAsync(v => v.VenueID == id).ConfigureAwait(false);
             if (venue == null)
             {
-                return this.BadRequest();
+                return this.NotFound();
             }
 
-            if (id != venue.VenueID)
+            // Permission is decided before anything about the request is validated or applied.
+            var isStaff = await VenueAccess.IsStaffAsync(this.context, userId.Value).ConfigureAwait(false);
+            if (!isStaff && !await VenueAccess.IsOwnerAsync(this.context, id, userId.Value).ConfigureAwait(false))
             {
-                return this.BadRequest();
+                return this.Forbidden("You are not allowed to edit this venue.");
             }
 
-            var validationError = ValidateVenueFields(venue);
+            if (request.IsModerationBlocked.HasValue && request.IsModerationBlocked.Value != venue.IsModerationBlocked && !isStaff)
+            {
+                return this.Forbidden("Only staff can change the moderation status of a venue.");
+            }
+
+            var validationError = ValidateVenueRequest(request);
             if (validationError != null)
             {
                 return this.BadRequest(validationError);
             }
 
-            this.context.Entry(venue).State = EntityState.Modified;
+            if (!await this.AddressExistsAsync(request.AddressID).ConfigureAwait(false))
+            {
+                return this.BadRequest(AddressNotFoundMessage);
+            }
+
+            // Only whitelisted fields are copied. The logo and the plaintext copies are managed elsewhere.
+            venue.Name = request.Name!.Trim();
+            venue.AddressID = request.AddressID;
+            venue.ExternalLinkID = request.ExternalLinkID;
+            venue.PhoneContactID = request.PhoneContactID;
+            venue.Description = request.Description;
+            venue.EventSourceUrl = request.EventSourceUrl;
+
+            if (request.IsPublished.HasValue)
+            {
+                venue.IsPublished = request.IsPublished.Value;
+            }
+
+            if (request.IsModerationBlocked.HasValue)
+            {
+                venue.IsModerationBlocked = request.IsModerationBlocked.Value;
+            }
 
             try
             {
                 await this.context.SaveChangesAsync().ConfigureAwait(false);
-
-                await this.TryWriteAuditLogAsync(
-                    shortText: "Venue updated",
-                    tags: "scope=audit;entity=venue;event=profile;operation=update;result=success;channel=db",
-                    loggedData: $"venueId={venue.VenueID};name={venue.Name}")
-                    .ConfigureAwait(false);
             }
             catch (DbUpdateConcurrencyException)
             {
@@ -339,11 +436,16 @@ namespace TAGWEBAPI.Controllers
                 {
                     return this.NotFound();
                 }
-                else
-                {
-                    throw;
-                }
+
+                throw;
             }
+
+            await this.TryWriteAuditLogAsync(
+                shortText: "Venue updated",
+                tags: "scope=audit;entity=venue;event=profile;operation=update;result=success;channel=db",
+                loggedData: $"venueId={venue.VenueID};name={venue.Name}",
+                userId: userId)
+                .ConfigureAwait(false);
 
             return this.NoContent();
         }
@@ -351,10 +453,21 @@ namespace TAGWEBAPI.Controllers
         [HttpDelete("{id}")]
         public async Task<IActionResult> DeleteVenue(int id)
         {
+            var userId = VenueAccess.GetUserId(this.User);
+            if (userId == null)
+            {
+                return this.Unauthorized();
+            }
+
             var venue = await this.context.Set<Venue>().FindAsync(id).ConfigureAwait(false);
             if (venue == null)
             {
                 return this.NotFound();
+            }
+
+            if (!await VenueAccess.CanManageAsync(this.context, id, userId.Value).ConfigureAwait(false))
+            {
+                return this.Forbidden("You are not allowed to delete this venue.");
             }
 
             this.context.Set<Venue>().Remove(venue);
@@ -364,7 +477,8 @@ namespace TAGWEBAPI.Controllers
                 shortText: "Venue deleted",
                 tags: "scope=audit;entity=venue;event=profile;operation=delete;result=success;channel=db",
                 critical: true,
-                loggedData: $"venueId={id};name={venue.Name}")
+                loggedData: $"venueId={id};name={venue.Name}",
+                userId: userId)
                 .ConfigureAwait(false);
 
             return this.NoContent();
@@ -419,7 +533,7 @@ namespace TAGWEBAPI.Controllers
             return string.IsNullOrWhiteSpace(trimmedTitle) ? fallbackSlug : trimmedTitle;
         }
 
-        private static string ToSlug(string value)
+        internal static string ToSlug(string value)
         {
             if (string.IsNullOrWhiteSpace(value))
             {
@@ -448,32 +562,51 @@ namespace TAGWEBAPI.Controllers
             return existingNames.All(name => ToSlug(name) != slug);
         }
 
-        private async Task<bool> IsModeratorAsync(int userId)
+        private ObjectResult Forbidden(string message)
         {
-            if (userId <= 0)
-            {
-                return false;
-            }
-
-            return await this.context.Users
-                .Where(u => u.UserID == userId)
-                .Select(u => u.Moderator)
-                .FirstOrDefaultAsync()
-                .ConfigureAwait(false);
+            return this.StatusCode(StatusCodes.Status403Forbidden, new { message });
         }
 
-        // Normalizes and validates the optional venue fields; returns an error message, or null when valid.
-        private static string? ValidateVenueFields(Venue venue)
+        private Task<bool> AddressExistsAsync(int addressId)
         {
-            if (venue.AddressID <= 0)
+            return this.context.Set<Address>().AnyAsync(a => a.AddressID == addressId);
+        }
+
+        // Published, unblocked venues are visible to any signed-in user; drafts and blocked venues only to their owners and staff.
+        private async Task<bool> CanViewVenueAsync(Venue venue)
+        {
+            if (venue.IsPublished && !venue.IsModerationBlocked)
             {
-                return "AddressID is required and must reference an existing address.";
+                return true;
             }
 
-            var eventSourceUrl = venue.EventSourceUrl?.Trim();
+            var userId = VenueAccess.GetUserId(this.User);
+            return userId != null
+                && await VenueAccess.CanManageAsync(this.context, venue.VenueID, userId.Value).ConfigureAwait(false);
+        }
+
+        // Normalizes and validates the writable venue fields; returns an error message, or null when valid.
+        private static string? ValidateVenueRequest(VenueWriteRequest request)
+        {
+            if (string.IsNullOrWhiteSpace(request.Name))
+            {
+                return "Name is required.";
+            }
+
+            if (request.Name.Trim().Length > VenueNameMaxLength)
+            {
+                return $"Name must be at most {VenueNameMaxLength} characters.";
+            }
+
+            if (request.AddressID <= 0)
+            {
+                return AddressNotFoundMessage;
+            }
+
+            var eventSourceUrl = request.EventSourceUrl?.Trim();
             if (string.IsNullOrEmpty(eventSourceUrl))
             {
-                venue.EventSourceUrl = null;
+                request.EventSourceUrl = null;
             }
             else
             {
@@ -488,10 +621,10 @@ namespace TAGWEBAPI.Controllers
                     return "EventSourceUrl must be an absolute http or https URL.";
                 }
 
-                venue.EventSourceUrl = eventSourceUrl;
+                request.EventSourceUrl = eventSourceUrl;
             }
 
-            if (venue.Description != null && venue.Description.Length > DescriptionMaxLength)
+            if (request.Description != null && request.Description.Length > DescriptionMaxLength)
             {
                 return $"Description must be at most {DescriptionMaxLength} characters.";
             }
@@ -499,13 +632,14 @@ namespace TAGWEBAPI.Controllers
             return null;
         }
 
-        private static object MapVenueForApi(Venue venue)
+        internal static object MapVenueForApi(Venue venue)
         {
             return new
             {
                 venue.VenueID,
                 Name = CoalescePlaintext(venue.Name_Plaintext, venue.Name),
                 NameRichtext = venue.Name,
+                Slug = ToSlug(venue.Name),
                 Description = CoalescePlaintext(venue.Description_Plaintext, venue.Description),
                 DescriptionRichtext = venue.Description,
                 venue.EventSourceUrl,

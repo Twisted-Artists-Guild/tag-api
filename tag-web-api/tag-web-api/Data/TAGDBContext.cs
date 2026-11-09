@@ -216,6 +216,7 @@ namespace TAGWEBAPI.Data
             modelBuilder.ApplyConfiguration(new TAGWEBAPI.Models.Configurations.TicketConfiguration());
             modelBuilder.ApplyConfiguration(new TAGWEBAPI.Models.Configurations.TicketTypeConfiguration());
             modelBuilder.ApplyConfiguration(new TAGWEBAPI.Models.Configurations.VenueConfiguration());
+            modelBuilder.ApplyConfiguration(new TAGWEBAPI.Models.Configurations.LinkerUserToVenueConfiguration());
             modelBuilder.ApplyConfiguration(new TAGWEBAPI.Models.Configurations.ArtistPermissionsConfiguration());
             modelBuilder.ApplyConfiguration(new TAGWEBAPI.Models.Configurations.ContestConfiguration());
             modelBuilder.ApplyConfiguration(new TAGWEBAPI.Models.Configurations.ContestEntryConfiguration());
