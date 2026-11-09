@@ -1,10 +1,10 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Logging.Abstractions;
 using TAGWEBAPI.Controllers;
 using TAGWEBAPI.Data;
 using TAGWEBAPI.Models;
 using Xunit;
+using static tagApiUnitTests.VenueTestSupport;
 
 namespace tagApiUnitTests;
 
@@ -12,29 +12,6 @@ namespace tagApiUnitTests;
 // and an optional, validated event-source URL.
 public class VenueControllerTests
 {
-    private const int AddressId = 900;
-
-    private static DbContextOptions<TAGDBContext> CreateOptions(string databaseName) =>
-        new DbContextOptionsBuilder<TAGDBContext>().UseInMemoryDatabase(databaseName).Options;
-
-    private static VenueController CreateController(TAGDBContext context) =>
-        new(context, NullLogger<VenueController>.Instance);
-
-    // Seeds through a separate context so the controller under test starts with a clean change tracker.
-    private static async Task SeedAsync(DbContextOptions<TAGDBContext> options, Venue? venue = null)
-    {
-        await using var seed = new TAGDBContext(options);
-        seed.Set<Address>().Add(new Address { AddressID = AddressId, AddressLine1 = "1 Main St", City = "Atlanta", State = "GA", ZipCode = "30301", Country = "USA" });
-        if (venue != null)
-        {
-            seed.Set<Venue>().Add(venue);
-        }
-
-        await seed.SaveChangesAsync();
-    }
-
-    private static object? Prop(object? value, string name) => value?.GetType().GetProperty(name)?.GetValue(value);
-
     [Fact]
     public async Task PostVenue_WithOnlyNameAndAddress_CreatesVenueWithoutContacts()
     {
@@ -43,7 +20,7 @@ public class VenueControllerTests
         await using var context = new TAGDBContext(options);
         var controller = CreateController(context);
 
-        var result = await controller.PostVenue(new Venue { Name = "Unowned Hall", AddressID = AddressId });
+        var result = await controller.PostVenue(new VenueCreateRequest { Name = "Unowned Hall", AddressID = AddressId });
 
         Assert.IsType<CreatedAtActionResult>(result.Result);
         var saved = await context.Set<Venue>().SingleAsync();
@@ -68,9 +45,8 @@ public class VenueControllerTests
         var options = CreateOptions($"{nameof(PostVenue_NonHttpEventSourceUrl_ReturnsBadRequest)}-{url.Length}");
         await SeedAsync(options);
         await using var context = new TAGDBContext(options);
-        var controller = CreateController(context);
 
-        var result = await controller.PostVenue(new Venue { Name = "Bad Url Hall", AddressID = AddressId, EventSourceUrl = url });
+        var result = await CreateController(context).PostVenue(new VenueCreateRequest { Name = "Bad Url Hall", AddressID = AddressId, EventSourceUrl = url });
 
         Assert.IsType<BadRequestObjectResult>(result.Result);
         Assert.Empty(context.Set<Venue>());
@@ -82,10 +58,9 @@ public class VenueControllerTests
         var options = CreateOptions(nameof(PostVenue_EventSourceUrlTooLong_ReturnsBadRequest));
         await SeedAsync(options);
         await using var context = new TAGDBContext(options);
-        var controller = CreateController(context);
         var url = "https://example.com/" + new string('a', Venue.EventSourceUrlMaxLength);
 
-        var result = await controller.PostVenue(new Venue { Name = "Long Url Hall", AddressID = AddressId, EventSourceUrl = url });
+        var result = await CreateController(context).PostVenue(new VenueCreateRequest { Name = "Long Url Hall", AddressID = AddressId, EventSourceUrl = url });
 
         Assert.IsType<BadRequestObjectResult>(result.Result);
     }
@@ -100,9 +75,8 @@ public class VenueControllerTests
         var options = CreateOptions($"{nameof(PostVenue_EventSourceUrl_IsTrimmedAndEmptyBecomesNull)}-{input.Length}");
         await SeedAsync(options);
         await using var context = new TAGDBContext(options);
-        var controller = CreateController(context);
 
-        var result = await controller.PostVenue(new Venue { Name = "Url Hall", AddressID = AddressId, EventSourceUrl = input });
+        var result = await CreateController(context).PostVenue(new VenueCreateRequest { Name = "Url Hall", AddressID = AddressId, EventSourceUrl = input });
 
         Assert.IsType<CreatedAtActionResult>(result.Result);
         Assert.Equal(expected, (await context.Set<Venue>().SingleAsync()).EventSourceUrl);
@@ -114,9 +88,8 @@ public class VenueControllerTests
         var options = CreateOptions(nameof(PostVenue_DescriptionTooLong_ReturnsBadRequest));
         await SeedAsync(options);
         await using var context = new TAGDBContext(options);
-        var controller = CreateController(context);
 
-        var result = await controller.PostVenue(new Venue { Name = "Wordy Hall", AddressID = AddressId, Description = new string('a', 20001) });
+        var result = await CreateController(context).PostVenue(new VenueCreateRequest { Name = "Wordy Hall", AddressID = AddressId, Description = new string('a', 20001) });
 
         Assert.IsType<BadRequestObjectResult>(result.Result);
     }
@@ -125,7 +98,7 @@ public class VenueControllerTests
     public async Task GetVenueById_ReturnsPlaintextAndRichtextDescription()
     {
         var options = CreateOptions(nameof(GetVenueById_ReturnsPlaintextAndRichtextDescription));
-        await SeedAsync(options, new Venue { VenueID = 1, Name = "Hall", AddressID = AddressId, Description = "<p>Hello <b>world</b></p>", EventSourceUrl = "https://example.com/events" });
+        await SeedAsync(options, new Venue { VenueID = 1, Name = "Hall", AddressID = AddressId, IsPublished = true, Description = "<p>Hello <b>world</b></p>", EventSourceUrl = "https://example.com/events" });
         await using var context = new TAGDBContext(options);
 
         var read = Assert.IsType<OkObjectResult>((await CreateController(context).GetVenueById(1)).Result);
@@ -140,7 +113,7 @@ public class VenueControllerTests
     public async Task GetVenueById_PrefersStoredPlaintextDescription()
     {
         var options = CreateOptions(nameof(GetVenueById_PrefersStoredPlaintextDescription));
-        await SeedAsync(options, new Venue { VenueID = 1, Name = "Hall", AddressID = AddressId, Description = "<p>Rich</p>", Description_Plaintext = "Stored plain" });
+        await SeedAsync(options, new Venue { VenueID = 1, Name = "Hall", AddressID = AddressId, IsPublished = true, Description = "<p>Rich</p>", Description_Plaintext = "Stored plain" });
         await using var context = new TAGDBContext(options);
 
         var read = Assert.IsType<OkObjectResult>((await CreateController(context).GetVenueById(1)).Result);
@@ -152,10 +125,10 @@ public class VenueControllerTests
     public async Task PutVenue_InvalidEventSourceUrl_ReturnsBadRequestAndKeepsStoredValue()
     {
         var options = CreateOptions(nameof(PutVenue_InvalidEventSourceUrl_ReturnsBadRequestAndKeepsStoredValue));
-        await SeedAsync(options, new Venue { VenueID = 1, Name = "Hall", AddressID = AddressId, EventSourceUrl = "https://example.com/events" });
+        await SeedAsync(options, new Venue { VenueID = 1, Name = "Hall", AddressID = AddressId, EventSourceUrl = "https://example.com/events" }, ownerUserId: 1);
         await using var context = new TAGDBContext(options);
 
-        var result = await CreateController(context).PutVenue(1, new Venue { VenueID = 1, Name = "Hall", AddressID = AddressId, EventSourceUrl = "javascript:alert(1)" });
+        var result = await CreateController(context).PutVenue(1, new VenueUpdateRequest { VenueID = 1, Name = "Hall", AddressID = AddressId, EventSourceUrl = "javascript:alert(1)" });
 
         Assert.IsType<BadRequestObjectResult>(result);
         await using var verify = new TAGDBContext(options);
@@ -166,10 +139,10 @@ public class VenueControllerTests
     public async Task PutVenue_AllowsClearingOptionalContactsAndSavesNewFields()
     {
         var options = CreateOptions(nameof(PutVenue_AllowsClearingOptionalContactsAndSavesNewFields));
-        await SeedAsync(options, new Venue { VenueID = 1, Name = "Hall", AddressID = AddressId, ExternalLinkID = 5, PhoneContactID = 5 });
+        await SeedAsync(options, new Venue { VenueID = 1, Name = "Hall", AddressID = AddressId, ExternalLinkID = 5, PhoneContactID = 5 }, ownerUserId: 1);
         await using var context = new TAGDBContext(options);
 
-        var result = await CreateController(context).PutVenue(1, new Venue
+        var result = await CreateController(context).PutVenue(1, new VenueUpdateRequest
         {
             VenueID = 1,
             Name = "Hall",
@@ -192,13 +165,14 @@ public class VenueControllerTests
     [Theory]
     [InlineData(0)]
     [InlineData(-1)]
-    public async Task PutVenue_MissingAddressId_ReturnsBadRequestInsteadOfFailingInTheDatabase(int addressId)
+    [InlineData(12345)]
+    public async Task PutVenue_MissingOrUnknownAddressId_ReturnsBadRequestInsteadOfFailingInTheDatabase(int addressId)
     {
-        var options = CreateOptions($"{nameof(PutVenue_MissingAddressId_ReturnsBadRequestInsteadOfFailingInTheDatabase)}-{addressId}");
-        await SeedAsync(options, new Venue { VenueID = 1, Name = "Hall", AddressID = AddressId });
+        var options = CreateOptions($"{nameof(PutVenue_MissingOrUnknownAddressId_ReturnsBadRequestInsteadOfFailingInTheDatabase)}-{addressId}");
+        await SeedAsync(options, new Venue { VenueID = 1, Name = "Hall", AddressID = AddressId }, ownerUserId: 1);
         await using var context = new TAGDBContext(options);
 
-        var result = await CreateController(context).PutVenue(1, new Venue { VenueID = 1, Name = "Renamed", AddressID = addressId });
+        var result = await CreateController(context).PutVenue(1, new VenueUpdateRequest { VenueID = 1, Name = "Renamed", AddressID = addressId });
 
         Assert.IsType<BadRequestObjectResult>(result);
         await using var verify = new TAGDBContext(options);
@@ -207,16 +181,33 @@ public class VenueControllerTests
         Assert.Equal(AddressId, stored.AddressID);
     }
 
-    [Fact]
-    public async Task PostVenue_MissingAddressId_ReturnsBadRequest()
+    [Theory]
+    [InlineData(0)]
+    [InlineData(12345)]
+    public async Task PostVenue_MissingOrUnknownAddressId_ReturnsBadRequest(int addressId)
     {
-        var options = CreateOptions(nameof(PostVenue_MissingAddressId_ReturnsBadRequest));
+        var options = CreateOptions($"{nameof(PostVenue_MissingOrUnknownAddressId_ReturnsBadRequest)}-{addressId}");
         await using var context = new TAGDBContext(options);
 
-        var result = await CreateController(context).PostVenue(new Venue { Name = "No Address Hall", AddressID = 0 });
+        var result = await CreateController(context).PostVenue(new VenueCreateRequest { Name = "No Address Hall", AddressID = addressId });
 
         Assert.IsType<BadRequestObjectResult>(result.Result);
         Assert.Empty(context.Set<Venue>());
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task PutVenue_BlankName_ReturnsBadRequest(string? name)
+    {
+        var options = CreateOptions($"{nameof(PutVenue_BlankName_ReturnsBadRequest)}-{name?.Length}");
+        await SeedAsync(options, new Venue { VenueID = 1, Name = "Hall", AddressID = AddressId }, ownerUserId: 1);
+        await using var context = new TAGDBContext(options);
+
+        var result = await CreateController(context).PutVenue(1, new VenueUpdateRequest { VenueID = 1, Name = name, AddressID = AddressId });
+
+        Assert.IsType<BadRequestObjectResult>(result);
     }
 
     // The wizard saves with PUT /api/venue/{id} and sends only foreign key IDs, never nested objects.
@@ -241,9 +232,8 @@ public class VenueControllerTests
     {
         var options = CreateOptions(nameof(ReserveVenueSlug_DoesNotCreatePlaceholderWebsiteOrPhone));
         await using var context = new TAGDBContext(options);
-        var controller = CreateController(context);
 
-        var result = await controller.ReserveVenueSlug(new VenueSlugReservationRequest { Slug = "fresh-venue", Title = "Fresh Venue" });
+        var result = await CreateController(context).ReserveVenueSlug(new VenueSlugReservationRequest { Slug = "fresh-venue", Title = "Fresh Venue" });
 
         Assert.IsType<CreatedAtActionResult>(result.Result);
         var venue = await context.Set<Venue>().SingleAsync();
