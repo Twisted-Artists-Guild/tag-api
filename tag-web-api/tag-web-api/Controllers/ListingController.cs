@@ -31,6 +31,7 @@ namespace TAGWEBAPI.Controllers
             _logger = logger;
         }
 
+        /// <summary>Returns listings with their cover pictures and gallery pictures and videos.</summary>
         [HttpGet]
         [AllowAnonymous]
         public async Task<ActionResult<IEnumerable<Listing>>> GetListings()
@@ -45,6 +46,12 @@ namespace TAGWEBAPI.Controllers
                     .ThenInclude(a => a.ProfilePic)
                 .Include(l => l.ArtCategory)
                 .Include(l => l.CoverPic)
+                .Include(l => l.Gallery!)
+                    .ThenInclude(g => g.GalleryItems)
+                    .ThenInclude(gi => gi.Picture)
+                .Include(l => l.Gallery!)
+                    .ThenInclude(g => g.GalleryItems)
+                    .ThenInclude(gi => gi.Video)
                 .ToListAsync();
 
             if (!listings.Any())
@@ -57,6 +64,12 @@ namespace TAGWEBAPI.Controllers
                         .ThenInclude(a => a.ProfilePic)
                     .Include(l => l.ArtCategory)
                     .Include(l => l.CoverPic)
+                    .Include(l => l.Gallery!)
+                        .ThenInclude(g => g.GalleryItems)
+                        .ThenInclude(gi => gi.Picture)
+                    .Include(l => l.Gallery!)
+                        .ThenInclude(g => g.GalleryItems)
+                        .ThenInclude(gi => gi.Video)
                     .ToListAsync();
             }
 
