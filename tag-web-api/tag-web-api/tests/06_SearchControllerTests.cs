@@ -137,6 +137,20 @@ public class SearchControllerTests
     // ---- artists and events
 
     [Fact]
+    public async Task Search_IgnoresCase()
+    {
+        var options = await SeedAsync(nameof(Search_IgnoresCase));
+        await using var context = new TAGDBContext(options);
+        var search = CreateSearch(context, StaffId);
+
+        Assert.Single(Items(await search.SearchVenues("SEARCH HALL")));
+        Assert.Single(Items(await search.SearchArtists("search public")));
+        Assert.Single(Items(await search.SearchEvents("SEARCH LIVE")));
+        Assert.Single(Items(await search.SearchUsers("ANNPUBLIC")));
+        Assert.Empty(Items(await search.SearchVenues("nothing like it")));
+    }
+
+    [Fact]
     public async Task Artist_Anonymous_SeesOnlyPublishedUnblocked()
     {
         var options = await SeedAsync(nameof(Artist_Anonymous_SeesOnlyPublishedUnblocked));
