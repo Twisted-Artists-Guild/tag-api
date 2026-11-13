@@ -301,6 +301,11 @@ public class ContentReportController : ControllerBase
             var feedPost = await _context.FeedPosts.FindAsync(targetId);
             if (feedPost != null) feedPost.IsModerationBlocked = blocked;
         }
+        else if (string.Equals(type, "Venue", StringComparison.OrdinalIgnoreCase))
+        {
+            var venue = await _context.Venues.FindAsync(targetId);
+            if (venue != null) venue.IsModerationBlocked = blocked;
+        }
     }
 
     // ── Suspend User ─────────────────────────────────────────────────
