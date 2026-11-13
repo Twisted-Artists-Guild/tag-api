@@ -118,7 +118,7 @@ public class VenueImportController : ControllerBase
 
             if (known.TryGetValue(row.Key, out var match))
             {
-                this.ApplyToExisting(match, row, existing.OwnedVenueIds, result);
+                this.ApplyToExisting(match, row, existing, result);
                 if (match.IsNew)
                 {
                     newVenueRows.Add((result, match.Venue));
@@ -165,6 +165,15 @@ public class VenueImportController : ControllerBase
             this.context.Set<Venue>().Add(venue);
             newVenueRows.Add((result, venue));
             result.Status = StatusCreated;
+            var hintedCategory = FindCategory(existing.Categories, row.CategoryHint);
+            if (hintedCategory != null)
+            {
+                this.context.Set<Linker_VenueToCategory>().Add(new Linker_VenueToCategory { Venue = venue, VenueCategoryID = hintedCategory.VenueCategoryID });
+            }
+            else if (row.CategoryHint != null)
+            {
+                result.Message = UnmatchedCategoryMessage(row.CategoryHint);
+            }
             slugOwners[slug] = row.Name;
             known[row.Key] = new KnownVenue { Venue = venue, IsNew = true, FirstIndex = index };
         }
@@ -196,14 +205,14 @@ public class VenueImportController : ControllerBase
     }
 
     // Applies a matching row to a venue that already exists (or was created earlier in this batch).
-    private void ApplyToExisting(KnownVenue match, ParsedRow row, ISet<int> ownedVenueIds, VenueImportRowResult result)
+    private void ApplyToExisting(KnownVenue match, ParsedRow row, ExistingVenues existing, VenueImportRowResult result)
     {
         var venue = match.Venue;
         result.VenueID = match.IsNew ? null : venue.VenueID;
         result.Message = match.IsNew ? $"Same venue as row {match.FirstIndex} in this batch." : null;
 
         // Owner-managed and blocked venues are never changed by an import.
-        if (!match.IsNew && (venue.IsModerationBlocked || ownedVenueIds.Contains(venue.VenueID)))
+        if (!match.IsNew && (venue.IsModerationBlocked || existing.OwnedVenueIds.Contains(venue.VenueID)))
         {
             result.Status = StatusUnchanged;
             result.Message = venue.IsModerationBlocked
@@ -225,8 +234,38 @@ public class VenueImportController : ControllerBase
             changed = true;
         }
 
+        // A category hint only fills in a venue that has no category yet, so it never undoes a staff or owner choice.
+        if (row.CategoryHint != null && !match.IsNew && !existing.VenuesWithCategories.Contains(venue.VenueID))
+        {
+            var hintedCategory = FindCategory(existing.Categories, row.CategoryHint);
+            if (hintedCategory != null)
+            {
+                this.context.Set<Linker_VenueToCategory>().Add(new Linker_VenueToCategory { VenueID = venue.VenueID, VenueCategoryID = hintedCategory.VenueCategoryID });
+                existing.VenuesWithCategories.Add(venue.VenueID);
+                changed = true;
+            }
+            else
+            {
+                result.Message = UnmatchedCategoryMessage(row.CategoryHint);
+            }
+        }
+
         result.Status = changed ? StatusUpdated : StatusUnchanged;
     }
+
+    // The hint matches an active category by name or by slug, ignoring case.
+    private static VenueCategory? FindCategory(IEnumerable<VenueCategory> categories, string? hint)
+    {
+        if (hint == null)
+        {
+            return null;
+        }
+
+        var slug = VenueController.ToSlug(hint);
+        return categories.FirstOrDefault(c => string.Equals(c.Name, hint, StringComparison.OrdinalIgnoreCase) || (slug.Length > 0 && c.Slug == slug));
+    }
+
+    private static string UnmatchedCategoryMessage(string hint) => $"Category hint '{hint}' did not match a venue category; the venue has no category yet.";
 
     private async Task<ExistingVenues> LoadExistingAsync(IReadOnlyCollection<string> cities)
     {
@@ -271,7 +310,21 @@ public class VenueImportController : ControllerBase
             .ToListAsync()
             .ConfigureAwait(false);
 
-        return new ExistingVenues(slugOwners, byKey, owned.ToHashSet());
+        var venuesWithCategories = await this.context.Set<Linker_VenueToCategory>()
+            .AsNoTracking()
+            .Where(l => candidateIds.Contains(l.VenueID))
+            .Select(l => l.VenueID)
+            .Distinct()
+            .ToListAsync()
+            .ConfigureAwait(false);
+
+        var categories = await this.context.Set<VenueCategory>()
+            .AsNoTracking()
+            .Where(c => c.IsActive)
+            .ToListAsync()
+            .ConfigureAwait(false);
+
+        return new ExistingVenues(slugOwners, byKey, owned.ToHashSet(), categories, venuesWithCategories.ToHashSet());
     }
 
     // Written after the batch is saved so the entry can list the venue ids it created and updated.
@@ -375,6 +428,7 @@ public class VenueImportController : ControllerBase
             Country = country,
             EventSourceUrl = eventSourceUrl,
             RegionHint = region,
+            CategoryHint = category,
             Key = BuildKey(name, line1, city, state),
         };
         return null;
@@ -459,6 +513,8 @@ public class VenueImportController : ControllerBase
 
         public string? RegionHint { get; init; }
 
+        public string? CategoryHint { get; init; }
+
         public string Key { get; init; } = string.Empty;
     }
 
@@ -471,7 +527,12 @@ public class VenueImportController : ControllerBase
         public int FirstIndex { get; init; }
     }
 
-    private sealed record ExistingVenues(Dictionary<string, string> SlugOwners, Dictionary<string, KnownVenue> ByKey, HashSet<int> OwnedVenueIds);
+    private sealed record ExistingVenues(
+        Dictionary<string, string> SlugOwners,
+        Dictionary<string, KnownVenue> ByKey,
+        HashSet<int> OwnedVenueIds,
+        List<VenueCategory> Categories,
+        HashSet<int> VenuesWithCategories);
 }
 
 /// <summary>A batch of venues to import.</summary>
@@ -482,7 +543,7 @@ public class VenueImportRequest
 
 /// <summary>
 /// One venue to import. Everything is nullable on purpose so a bad row is reported on its own instead of failing the batch.
-/// CategoryHint is validated but not stored yet, because venue categories do not exist yet.
+/// CategoryHint is matched by name or slug (ignoring case) to an active venue category.
 /// </summary>
 public class VenueImportItem
 {

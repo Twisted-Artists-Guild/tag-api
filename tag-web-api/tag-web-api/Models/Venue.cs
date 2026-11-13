@@ -49,4 +49,7 @@ public class Venue
     public virtual ExternalLink? ExternalLink { get; set; }
     public virtual PhoneContact? PhoneContact { get; set; }
     public virtual Picture? LogoPic { get; set; }
+
+    // Categories (and later tags and regions) are managed through their own endpoints and are never bound from request bodies.
+    public virtual ICollection<Linker_VenueToCategory> CategoryLinks { get; set; } = new List<Linker_VenueToCategory>();
 }
