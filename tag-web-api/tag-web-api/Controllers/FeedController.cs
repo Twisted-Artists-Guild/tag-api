@@ -110,7 +110,7 @@ public class FeedController : ControllerBase
             Body_Plaintext = StripHtml(dto.Body),
             SharedEntityType = dto.SharedEntityType,
             SharedEntityID = dto.SharedEntityID,
-            SharedURL = BuildShareURL(dto.SharedEntityType, dto.SharedEntityID),
+            SharedURL = await BuildShareUrlAsync(dto.SharedEntityType, dto.SharedEntityID),
             PictureID = dto.PictureID,
             IsPublished = true,
             CreatedAt = DateTime.UtcNow,
@@ -217,7 +217,7 @@ public class FeedController : ControllerBase
 
     // ── Helpers ──────────────────────────────────────────────────────
 
-    private string? BuildShareURL(string? entityType, int? entityId)
+    private async Task<string?> BuildShareUrlAsync(string? entityType, int? entityId)
     {
         if (string.IsNullOrEmpty(entityType) || !entityId.HasValue) return null;
 
@@ -227,9 +227,21 @@ public class FeedController : ControllerBase
             "artist" => $"/artists/{entityId.Value}",
             "event" => $"/events/{entityId.Value}",
             "vendor" => $"/vendors/{entityId.Value}",
-            "venue" => $"/venues/{entityId.Value}",
+            "venue" => await GetPublicVenuePathAsync(entityId.Value),
             _ => null,
         };
+    }
+
+    // The venue page lives at /venue/{slug}, and the slug comes from the venue name. Venues that are not public have no link.
+    private async Task<string?> GetPublicVenuePathAsync(int venueId)
+    {
+        var name = await _context.Venues.AsNoTracking()
+            .Where(v => v.VenueID == venueId && v.IsPublished && !v.IsModerationBlocked)
+            .Select(v => v.Name)
+            .FirstOrDefaultAsync();
+
+        var slug = name == null ? string.Empty : VenueController.ToSlug(name);
+        return slug.Length == 0 ? null : $"/venue/{slug}";
     }
 
     private async Task<FeedPostSummaryDTO> MapToSummary(FeedPost post)
@@ -254,8 +266,14 @@ public class FeedController : ControllerBase
             }
             else if (string.Equals(post.AuthorEntityType, "Venue", StringComparison.OrdinalIgnoreCase))
             {
-                var venue = await _context.Venues.AsNoTracking().FirstOrDefaultAsync(v => v.VenueID == post.AuthorEntityID.Value);
-                if (venue != null) { authorEntityName = StripHtml(venue.Name); }
+                // A venue that is not public shows no name and no link, so a draft venue is never revealed.
+                var venue = await _context.Venues.AsNoTracking()
+                    .FirstOrDefaultAsync(v => v.VenueID == post.AuthorEntityID.Value && v.IsPublished && !v.IsModerationBlocked);
+                if (venue != null)
+                {
+                    authorEntityName = StripHtml(venue.Name);
+                    authorEntityPath = $"/venue/{VenueController.ToSlug(venue.Name)}";
+                }
             }
         }
 
@@ -264,6 +282,11 @@ public class FeedController : ControllerBase
         {
             sharedPreview = await BuildSharedPreview(post.SharedEntityType, post.SharedEntityID.Value);
         }
+
+        // Posts saved before the venue page link was fixed hold an old /venues/{id} address, so it is rebuilt each time.
+        var sharedUrl = string.Equals(post.SharedEntityType, "Venue", StringComparison.OrdinalIgnoreCase) && post.SharedEntityID.HasValue
+            ? await GetPublicVenuePathAsync(post.SharedEntityID.Value)
+            : post.SharedURL;
 
         var reactionCount = await _context.Set<FeedPostImpression>()
             .CountAsync(i => i.FeedPostId == post.FeedPostID);
@@ -286,7 +309,7 @@ public class FeedController : ControllerBase
             Body_Plaintext = post.Body_Plaintext,
             SharedEntityType = post.SharedEntityType,
             SharedEntityID = post.SharedEntityID,
-            SharedURL = post.SharedURL,
+            SharedURL = sharedUrl,
             SharedEntityPreview = sharedPreview,
             PictureID = post.PictureID,
             PictureURL = post.Picture?.URL,
@@ -321,6 +344,17 @@ public class FeedController : ControllerBase
                 .FirstOrDefaultAsync(e => e.EventID == entityId && e.StatusID == EventStatus.Published);
             if (evt == null) return null;
             return new { type = "Event", id = evt.EventID, title = StripHtml(evt.Title), venue = StripHtml(evt.Venue?.Name), startTime = evt.StartTime, path = $"/events/{evt.Path}" };
+        }
+
+        if (string.Equals(entityType, "Venue", StringComparison.OrdinalIgnoreCase))
+        {
+            var venue = await _context.Venues.AsNoTracking().Include(v => v.LogoPic)
+                .FirstOrDefaultAsync(v => v.VenueID == entityId && v.IsPublished && !v.IsModerationBlocked);
+            if (venue == null) return null;
+
+            var description = VenueController.CoalescePlaintext(venue.Description_Plaintext, venue.Description);
+            if (description != null && description.Length > 160) description = description[..160].TrimEnd() + "…";
+            return new { type = "Venue", id = venue.VenueID, title = VenueController.CoalescePlaintext(venue.Name_Plaintext, venue.Name), image = venue.LogoPic?.URL, byline = description, path = $"/venue/{VenueController.ToSlug(venue.Name)}" };
         }
 
         return null;

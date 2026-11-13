@@ -12,6 +12,7 @@ namespace TAGWEBAPI.Controllers;
 /// </summary>
 [ApiController]
 [Route("search")]
+[Route("api/search")]
 public class SearchController : ControllerBase
 {
     private const int MaxLimit = 50;
@@ -35,12 +36,13 @@ public class SearchController : ControllerBase
         if (string.IsNullOrWhiteSpace(q))
             return Ok(Enumerable.Empty<object>());
 
+        var needle = q.ToLower();
         var query = _context.Artists.AsNoTracking().Where(a =>
             a.IsPublished && !a.IsModerationBlocked &&
-            ((a.Title != null && a.Title.Contains(q)) ||
-            (a.Byline != null && a.Byline.Contains(q)) ||
-            (a.Statement != null && a.Statement.Contains(q)) ||
-            (a.SEOTags != null && a.SEOTags.Contains(q)))
+            ((a.Title != null && a.Title.ToLower().Contains(needle)) ||
+            (a.Byline != null && a.Byline.ToLower().Contains(needle)) ||
+            (a.Statement != null && a.Statement.ToLower().Contains(needle)) ||
+            (a.SEOTags != null && a.SEOTags.ToLower().Contains(needle)))
         );
 
         var results = await query.Take(ClampLimit(limit)).ToListAsync(cancellationToken);
@@ -57,12 +59,13 @@ public class SearchController : ControllerBase
         if (string.IsNullOrWhiteSpace(q))
             return Ok(Enumerable.Empty<object>());
 
+        var needle = q.ToLower();
         var query = _context.Listings.AsNoTracking().Where(l =>
             l.IsPublished && !l.IsModerationBlocked &&
             l.Artist != null && l.Artist.IsPublished && !l.Artist.IsModerationBlocked &&
-            ((l.Title != null && l.Title.Contains(q)) ||
-            (l.Description != null && l.Description.Contains(q)) ||
-            (l.Path != null && l.Path.Contains(q)))
+            ((l.Title != null && l.Title.ToLower().Contains(needle)) ||
+            (l.Description != null && l.Description.ToLower().Contains(needle)) ||
+            (l.Path != null && l.Path.ToLower().Contains(needle)))
         );
 
         var results = await query.Take(ClampLimit(limit)).ToListAsync(cancellationToken);
@@ -79,12 +82,13 @@ public class SearchController : ControllerBase
         if (string.IsNullOrWhiteSpace(q))
             return Ok(Enumerable.Empty<object>());
 
+        var needle = q.ToLower();
         var query = _context.Events.AsNoTracking().Where(e =>
             e.StatusID == EventStatus.Published &&
-            ((e.Title != null && e.Title.Contains(q)) ||
-            (e.Description != null && e.Description.Contains(q)) ||
-            (e.Note != null && e.Note.Contains(q)) ||
-            (e.PointOfContact != null && e.PointOfContact.Contains(q)))
+            ((e.Title != null && e.Title.ToLower().Contains(needle)) ||
+            (e.Description != null && e.Description.ToLower().Contains(needle)) ||
+            (e.Note != null && e.Note.ToLower().Contains(needle)) ||
+            (e.PointOfContact != null && e.PointOfContact.ToLower().Contains(needle)))
         );
 
         var results = await query.Take(ClampLimit(limit)).ToListAsync(cancellationToken);
@@ -109,16 +113,17 @@ public class SearchController : ControllerBase
 
         var isStaff = await VenueAccess.IsStaffAsync(_context, callerId.Value).ConfigureAwait(false);
 
+        var needle = q.ToLower();
         var query = _context.Users.AsNoTracking().AsQueryable();
         if (isStaff)
         {
             query = query.Where(u =>
-                (u.FirstName != null && u.FirstName.Contains(q)) ||
-                (u.FamName != null && u.FamName.Contains(q)) ||
-                (u.PreferredName != null && u.PreferredName.Contains(q)) ||
-                (u.Username != null && u.Username.Contains(q)) ||
-                u.EmailOne.Contains(q) ||
-                (u.EmailTwo != null && u.EmailTwo.Contains(q)));
+                (u.FirstName != null && u.FirstName.ToLower().Contains(needle)) ||
+                (u.FamName != null && u.FamName.ToLower().Contains(needle)) ||
+                (u.PreferredName != null && u.PreferredName.ToLower().Contains(needle)) ||
+                (u.Username != null && u.Username.ToLower().Contains(needle)) ||
+                u.EmailOne.ToLower().Contains(needle) ||
+                (u.EmailTwo != null && u.EmailTwo.ToLower().Contains(needle)));
         }
         else
         {
@@ -126,10 +131,10 @@ public class SearchController : ControllerBase
             query = query.Where(u =>
                 u.IsPublished && !u.IsModerationBlocked && !u.HideFromPublic && !u.MembershipBanned &&
                 (u.UserPrivacy == null || !u.UserPrivacy.HideProfileFromPublic) &&
-                ((u.FirstName != null && u.FirstName.Contains(q)) ||
-                (u.FamName != null && u.FamName.Contains(q)) ||
-                (u.PreferredName != null && u.PreferredName.Contains(q)) ||
-                (u.Username != null && u.Username.Contains(q))));
+                ((u.FirstName != null && u.FirstName.ToLower().Contains(needle)) ||
+                (u.FamName != null && u.FamName.ToLower().Contains(needle)) ||
+                (u.PreferredName != null && u.PreferredName.ToLower().Contains(needle)) ||
+                (u.Username != null && u.Username.ToLower().Contains(needle))));
         }
 
         var users = await query.OrderBy(u => u.UserID).Take(ClampLimit(limit)).ToListAsync(cancellationToken);
@@ -154,8 +159,9 @@ public class SearchController : ControllerBase
         if (string.IsNullOrWhiteSpace(q))
             return Ok(Enumerable.Empty<object>());
 
+        var needle = q.ToLower();
         var venues = await _context.Venues.AsNoTracking()
-            .Where(v => v.IsPublished && !v.IsModerationBlocked && (v.Name_Plaintext ?? v.Name).Contains(q))
+            .Where(v => v.IsPublished && !v.IsModerationBlocked && (v.Name_Plaintext ?? v.Name).ToLower().Contains(needle))
             .OrderBy(v => v.VenueID)
             .Take(ClampLimit(limit))
             .ToListAsync(cancellationToken);

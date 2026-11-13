@@ -162,6 +162,31 @@ public class CommentsController : ControllerBase
                 }
             }
 
+            // Posting as a venue needs the same proof: the signed-in user must own it, and it must be public.
+            if (string.Equals(request.AuthorEntityType, "venue", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!request.AuthorEntityId.HasValue)
+                {
+                    return BadRequest("authorEntityId is required when authorEntityType is 'venue'");
+                }
+
+                var ownsVenue = await _context.Set<Linker_UserToVenue>()
+                    .AnyAsync(link => link.UserID == authenticatedUserId.Value && link.VenueID == request.AuthorEntityId.Value);
+
+                if (!ownsVenue)
+                {
+                    return StatusCode(StatusCodes.Status403Forbidden, "You are not authorized to comment as this venue");
+                }
+
+                var venueIsPublic = await _context.Set<Venue>()
+                    .AnyAsync(v => v.VenueID == request.AuthorEntityId.Value && v.IsPublished && !v.IsModerationBlocked);
+
+                if (!venueIsPublic)
+                {
+                    return BadRequest("A venue must be published before it can comment.");
+                }
+            }
+
             // If it's a reply, validate parent comment exists
             if (request.ParentCommentId.HasValue)
             {
@@ -415,10 +440,10 @@ public class CommentsController : ControllerBase
 
         // Resolve author identities (base user + artist profile) for top-level comments and their previewed replies in one pass.
         var allComments = topLevelComments.Concat(repliesByParent.Values.SelectMany(replies => replies)).ToList();
-        var (userLookup, artistLookup) = await LoadAuthorLookupsAsync(allComments);
+        var (userLookup, artistLookup, venueLookup) = await LoadAuthorLookupsAsync(allComments);
 
         return topLevelComments
-            .Select(comment => BuildCommentDto(comment, userLookup, artistLookup, replyCounts, repliesByParent))
+            .Select(comment => BuildCommentDto(comment, userLookup, artistLookup, venueLookup, replyCounts, repliesByParent))
             .ToList();
     }
 
@@ -426,6 +451,7 @@ public class CommentsController : ControllerBase
         Comment comment,
         IReadOnlyDictionary<int, UserInfoDto> userLookup,
         IReadOnlyDictionary<int, (string Title, string? ImageUrl)> artistLookup,
+        IReadOnlyDictionary<int, (string Title, string? ImageUrl)> venueLookup,
         IReadOnlyDictionary<long, int> replyCounts,
         IReadOnlyDictionary<long, List<Comment>> repliesByParent)
     {
@@ -433,7 +459,7 @@ public class CommentsController : ControllerBase
             ? foundUser
             : new UserInfoDto { Id = comment.UserId, Name = "Unknown User", Email = null, Image = null };
 
-        var (authorDisplayName, authorImage, authorEntityType) = ResolveAuthorDisplay(comment, user, artistLookup);
+        var (authorDisplayName, authorImage, authorEntityType) = ResolveAuthorDisplay(comment, user, artistLookup, venueLookup);
 
         var dto = new CommentDto
         {
@@ -459,18 +485,19 @@ public class CommentsController : ControllerBase
         if (repliesByParent.TryGetValue(comment.Id, out var replies))
         {
             dto.Replies = replies
-                .Select(reply => BuildCommentDto(reply, userLookup, artistLookup, replyCounts, repliesByParent))
+                .Select(reply => BuildCommentDto(reply, userLookup, artistLookup, venueLookup, replyCounts, repliesByParent))
                 .ToList();
         }
 
         return dto;
     }
 
-    // Resolves display name/image for the identity a comment was posted as (artist profile, or base user for older/unset comments).
+    // Resolves display name/image for the identity a comment was posted as (artist or venue profile, or base user for older/unset comments).
     private static (string DisplayName, string? Image, string EntityType) ResolveAuthorDisplay(
         Comment comment,
         UserInfoDto baseUser,
-        IReadOnlyDictionary<int, (string Title, string? ImageUrl)> artistLookup)
+        IReadOnlyDictionary<int, (string Title, string? ImageUrl)> artistLookup,
+        IReadOnlyDictionary<int, (string Title, string? ImageUrl)> venueLookup)
     {
         if (string.Equals(comment.AuthorEntityType, "artist", StringComparison.OrdinalIgnoreCase)
             && comment.AuthorEntityId.HasValue
@@ -479,16 +506,28 @@ public class CommentsController : ControllerBase
             return (artist.Title, artist.ImageUrl, "artist");
         }
 
+        if (string.Equals(comment.AuthorEntityType, "venue", StringComparison.OrdinalIgnoreCase)
+            && comment.AuthorEntityId.HasValue
+            && venueLookup.TryGetValue(comment.AuthorEntityId.Value, out var venue))
+        {
+            return (venue.Title, venue.ImageUrl, "venue");
+        }
+
         // Fallback: base user identity (covers older comments where AuthorEntityId is null, or unresolved entities)
         return (baseUser.Name, baseUser.Image, "user");
     }
 
-    // Batch-loads every user and artist identity referenced by the given comments in exactly two queries total.
-    private async Task<(Dictionary<int, UserInfoDto> Users, Dictionary<int, (string Title, string? ImageUrl)> Artists)> LoadAuthorLookupsAsync(List<Comment> comments)
+    // Batch-loads every user, artist and public venue identity referenced by the given comments in at most three queries.
+    private async Task<(Dictionary<int, UserInfoDto> Users, Dictionary<int, (string Title, string? ImageUrl)> Artists, Dictionary<int, (string Title, string? ImageUrl)> Venues)> LoadAuthorLookupsAsync(List<Comment> comments)
     {
         var userIds = comments.Select(c => c.UserId).Distinct().ToList();
         var artistIds = comments
             .Where(c => string.Equals(c.AuthorEntityType, "artist", StringComparison.OrdinalIgnoreCase) && c.AuthorEntityId.HasValue)
+            .Select(c => c.AuthorEntityId!.Value)
+            .Distinct()
+            .ToList();
+        var venueIds = comments
+            .Where(c => string.Equals(c.AuthorEntityType, "venue", StringComparison.OrdinalIgnoreCase) && c.AuthorEntityId.HasValue)
             .Select(c => c.AuthorEntityId!.Value)
             .Distinct()
             .ToList();
@@ -520,7 +559,23 @@ public class CommentsController : ControllerBase
             }
         }
 
-        return (users, artistLookup);
+        // A venue that is no longer public falls back to the commenting user, so its name is never revealed.
+        var venueLookup = new Dictionary<int, (string Title, string? ImageUrl)>();
+        if (venueIds.Count > 0)
+        {
+            var venues = await _context.Set<Venue>()
+                .AsNoTracking()
+                .Where(v => venueIds.Contains(v.VenueID) && v.IsPublished && !v.IsModerationBlocked)
+                .Select(v => new { v.VenueID, v.Name, v.Name_Plaintext, ImageUrl = v.LogoPic != null ? v.LogoPic.URL : null })
+                .ToListAsync();
+
+            foreach (var venue in venues)
+            {
+                venueLookup[venue.VenueID] = (VenueController.CoalescePlaintext(venue.Name_Plaintext, venue.Name) ?? venue.Name, venue.ImageUrl);
+            }
+        }
+
+        return (users, artistLookup, venueLookup);
     }
 
     private int? GetAuthenticatedUserId()

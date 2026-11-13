@@ -32,6 +32,7 @@ namespace TAGWEBAPI.Controllers
         }
 
         [HttpGet]
+        [AllowAnonymous]
         public async Task<ActionResult<IEnumerable<Venue>>> GetVenues()
         {
             var venues = await this.context.Set<Venue>()
@@ -68,6 +69,7 @@ namespace TAGWEBAPI.Controllers
         }
 
         [HttpGet("{id}")]
+        [AllowAnonymous]
         public async Task<ActionResult<Venue>> GetVenue(int id)
         {
             var venue = await this.context.Set<Venue>()
@@ -117,6 +119,7 @@ namespace TAGWEBAPI.Controllers
         }
 
         [HttpGet("by-slug/{slug}")]
+        [AllowAnonymous]
         public async Task<ActionResult<Venue>> GetVenueBySlug(string slug)
         {
             var normalizedSlug = NormalizeSlug(slug);
