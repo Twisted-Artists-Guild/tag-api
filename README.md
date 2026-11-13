@@ -41,6 +41,9 @@ Twisted Artists Guild is a digital cooperative focused on artist ownership, equi
 - `/Workflows` — Governance, payroll, events, accounting
 - `/Tests` — xUnit test suite
 
+### API Guides
+- [Venue import API](docs/venue-import-api.md) — staff bulk import for seeding venues (for the crawler)
+
 ---
 
 ## 🧪 Build and Test

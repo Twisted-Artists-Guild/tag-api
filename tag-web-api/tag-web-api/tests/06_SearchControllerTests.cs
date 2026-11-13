@@ -40,7 +40,7 @@ public class SearchControllerTests
             new User { UserID = 13, EmailOne = "blocked@example.com", Username = "annblocked", FirstName = "Ann", IsPublished = true, IsModerationBlocked = true });
 
         seed.Set<Venue>().AddRange(
-            new Venue { VenueID = 1, Name = "<b>Search</b> Hall", Name_Plaintext = "Search Hall", AddressID = AddressId, IsPublished = true, Description = "<p>Big room</p>", Description_Plaintext = "Big room" },
+            new Venue { VenueID = 1, Name = "Search Hall", Name_Plaintext = "Search Hall", AddressID = AddressId, IsPublished = true, Description = "<p>Big room</p>", Description_Plaintext = "Big room" },
             new Venue { VenueID = 2, Name = "Search Draft", AddressID = AddressId, IsPublished = false },
             new Venue { VenueID = 3, Name = "Search Blocked", AddressID = AddressId, IsPublished = true, IsModerationBlocked = true });
 
