@@ -47,7 +47,7 @@ to an account in the audit log. Anonymous callers get `401`, signed-in non-staff
 | `zipCode` | no | At most 20 characters. Not used for matching. |
 | `country` | no | At most 100 characters. Stored as given. |
 | `eventSourceUrl` | no | Absolute `http` or `https` URL, at most 2048 characters, no embedded credentials. The page a crawler can later scan for events. |
-| `regionHint` | no | At most 100 characters. Stored in the address region. |
+| `regionHint` | no | At most 100 characters. Saved as text on the address. It is also matched by name or slug, ignoring case, to an **active** shared region (see [regions-api.md](regions-api.md)). A match links the region to a new venue, or to an existing unowned venue that has no region yet. A region that is already set is never changed. A hint that matches nothing is reported in the row `message`, and the venue is still imported. |
 | `categoryHint` | no | At most 100 characters. Matched by name or filter key (slug), ignoring case, to an **active** venue category (see [venue-categories-api.md](venue-categories-api.md)). A match links the category to a new venue, or to an existing unowned venue that has no category yet. An existing category is never changed. A hint that matches nothing is reported in the row `message`, and the venue is still imported. |
 
 Text must not contain `<`, `>` or control characters, so crawled markup never reaches a page.

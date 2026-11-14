@@ -677,6 +677,12 @@ namespace TAGWEBAPI.Controllers
                     .Select(link => link.Tag!.Name)
                     .OrderBy(name => name, StringComparer.Ordinal)
                     .ToList(),
+                Regions = (venue.RegionLinks ?? new List<Linker_VenueToRegion>())
+                    .Where(link => link.Region != null)
+                    .Select(link => link.Region!)
+                    .OrderBy(region => region.Name, StringComparer.Ordinal)
+                    .Select(region => new { region.RegionID, region.Name, region.Slug, region.Type, region.States, region.IsActive })
+                    .ToList(),
                 venue.Address,
                 venue.ExternalLink,
                 venue.PhoneContact,

@@ -105,7 +105,8 @@ namespace TAGWEBAPI.Controllers
             return query
                 .Include(v => v.LogoPic)
                 .Include(v => v.CategoryLinks).ThenInclude(l => l.Category)
-                .Include(v => v.TagLinks).ThenInclude(l => l.Tag);
+                .Include(v => v.TagLinks).ThenInclude(l => l.Tag)
+                .Include(v => v.RegionLinks).ThenInclude(l => l.Region);
         }
     }
 }

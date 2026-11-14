@@ -221,6 +221,9 @@ namespace TAGWEBAPI.Data
         modelBuilder.ApplyConfiguration(new TAGWEBAPI.Models.Configurations.LinkerVenueToCategoryConfiguration());
         modelBuilder.ApplyConfiguration(new TAGWEBAPI.Models.Configurations.VenueTagConfiguration());
         modelBuilder.ApplyConfiguration(new TAGWEBAPI.Models.Configurations.LinkerVenueToTagConfiguration());
+        modelBuilder.ApplyConfiguration(new TAGWEBAPI.Models.Configurations.RegionConfiguration());
+        modelBuilder.ApplyConfiguration(new TAGWEBAPI.Models.Configurations.LinkerVenueToRegionConfiguration());
+        modelBuilder.ApplyConfiguration(new TAGWEBAPI.Models.Configurations.LinkerArtistToRegionConfiguration());
             modelBuilder.ApplyConfiguration(new TAGWEBAPI.Models.Configurations.ArtistPermissionsConfiguration());
             modelBuilder.ApplyConfiguration(new TAGWEBAPI.Models.Configurations.ContestConfiguration());
             modelBuilder.ApplyConfiguration(new TAGWEBAPI.Models.Configurations.ContestEntryConfiguration());

@@ -54,4 +54,6 @@ public class Venue
     public virtual ICollection<Linker_VenueToCategory> CategoryLinks { get; set; } = new List<Linker_VenueToCategory>();
 
     public virtual ICollection<Linker_VenueToTag> TagLinks { get; set; } = new List<Linker_VenueToTag>();
+
+    public virtual ICollection<Linker_VenueToRegion> RegionLinks { get; set; } = new List<Linker_VenueToRegion>();
 }
