@@ -1,0 +1,28 @@
+# Runs the API unit tests on every pull request, so a failing test is visible before merge.
+# This workflow only tests: it never publishes or deploys.
+
+name: API tests
+
+on:
+  pull_request:
+    branches:
+      - main
+      - dev
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read #This is required for actions/checkout
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up .NET Core
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.x'
+
+      - name: Run tests
+        run: dotnet test tag-web-api/tag-web-api/tests/tests.csproj --configuration Release

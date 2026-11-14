@@ -37,7 +37,7 @@ namespace TAGWEBAPI.Controllers
         {
             var venues = await this.context.Set<Venue>()
                 .Where(v => v.IsPublished && !v.IsModerationBlocked)
-                .Include(v => v.LogoPic)
+                .IncludeVenueDetails()
                 .ToListAsync()
                 .ConfigureAwait(false);
 
@@ -61,7 +61,7 @@ namespace TAGWEBAPI.Controllers
 
             var venues = await this.context.Set<Venue>()
                 .Where(v => !v.IsPublished || v.IsModerationBlocked)
-                .Include(v => v.LogoPic)
+                .IncludeVenueDetails()
                 .ToListAsync()
                 .ConfigureAwait(false);
 
@@ -73,7 +73,7 @@ namespace TAGWEBAPI.Controllers
         public async Task<ActionResult<Venue>> GetVenue(int id)
         {
             var venue = await this.context.Set<Venue>()
-                .Include(v => v.LogoPic)
+                .IncludeVenueDetails()
                 .FirstOrDefaultAsync(v => v.VenueID == id)
                 .ConfigureAwait(false);
 
@@ -89,7 +89,7 @@ namespace TAGWEBAPI.Controllers
         public async Task<ActionResult<Venue>> GetVenueById(int id)
         {
             var venue = await this.context.Set<Venue>()
-                .Include(v => v.LogoPic)
+                .IncludeVenueDetails()
                 .FirstOrDefaultAsync(v => v.VenueID == id)
                 .ConfigureAwait(false);
             if (venue == null || !await this.CanViewVenueAsync(venue).ConfigureAwait(false))
@@ -156,7 +156,7 @@ namespace TAGWEBAPI.Controllers
 
             var venue = await this.context.Set<Venue>()
                 .AsNoTracking()
-                .Include(v => v.LogoPic)
+                .IncludeVenueDetails()
                 .FirstOrDefaultAsync(v => v.VenueID == matchedVenueId.Value)
                 .ConfigureAwait(false);
 
@@ -653,6 +653,13 @@ namespace TAGWEBAPI.Controllers
                 venue.IsModerationBlocked,
                 venue.LogoPicID,
                 venue.LogoPic,
+                Categories = (venue.CategoryLinks ?? new List<Linker_VenueToCategory>())
+                    .Where(link => link.Category != null)
+                    .Select(link => link.Category!)
+                    .OrderBy(category => category.SortOrder)
+                    .ThenBy(category => category.Name)
+                    .Select(category => new { category.VenueCategoryID, category.Name, category.Slug, category.IsActive })
+                    .ToList(),
                 venue.Address,
                 venue.ExternalLink,
                 venue.PhoneContact,

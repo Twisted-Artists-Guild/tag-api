@@ -4,6 +4,9 @@
 
 namespace TAGWEBAPI.Controllers
 {
+    using Microsoft.EntityFrameworkCore;
+    using TAGWEBAPI.Models;
+
     /// <summary>
     /// The venue fields a client may write. Anything else in a request body (logo, moderation flags, ids of
     /// related records) is ignored, so a client cannot overwrite data it does not own.
@@ -89,5 +92,19 @@ namespace TAGWEBAPI.Controllers
         public string? Username { get; set; }
 
         public string? Email { get; set; }
+    }
+
+    /// <summary>
+    /// Loads everything a venue response carries. Every place that returns a venue uses this, so a new kind of venue
+    /// data (categories, tags, regions) only has to be added here.
+    /// </summary>
+    internal static class VenueQueryExtensions
+    {
+        public static IQueryable<Venue> IncludeVenueDetails(this IQueryable<Venue> query)
+        {
+            return query
+                .Include(v => v.LogoPic)
+                .Include(v => v.CategoryLinks).ThenInclude(l => l.Category);
+        }
     }
 }

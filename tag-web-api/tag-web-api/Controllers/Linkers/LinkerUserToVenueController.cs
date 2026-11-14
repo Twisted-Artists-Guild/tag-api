@@ -57,7 +57,7 @@ namespace TAGWEBAPI.Controllers
 
             var venues = await this.context.Set<Venue>()
                 .AsNoTracking()
-                .Include(venue => venue.LogoPic)
+                .IncludeVenueDetails()
                 .Where(venue => venueIds.Contains(venue.VenueID))
                 .OrderBy(venue => venue.Name)
                 .ToListAsync()
