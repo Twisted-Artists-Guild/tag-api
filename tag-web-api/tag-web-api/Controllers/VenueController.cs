@@ -33,10 +33,22 @@ namespace TAGWEBAPI.Controllers
 
         [HttpGet]
         [AllowAnonymous]
-        public async Task<ActionResult<IEnumerable<Venue>>> GetVenues()
+        public async Task<ActionResult<IEnumerable<Venue>>> GetVenues([FromQuery(Name = "tag")] string[]? tag = null)
         {
-            var venues = await this.context.Set<Venue>()
-                .Where(v => v.IsPublished && !v.IsModerationBlocked)
+            var query = this.context.Set<Venue>().Where(v => v.IsPublished && !v.IsModerationBlocked);
+
+            // A venue has to carry every requested tag. A tag that can't exist matches no venue.
+            foreach (var requested in (tag ?? Array.Empty<string>()).Take(VenueTag.MaxTagsPerVenue))
+            {
+                if (!VenueTag.TryNormalize(requested, out var tagName, out _))
+                {
+                    return this.Ok(Array.Empty<object>());
+                }
+
+                query = query.Where(v => v.TagLinks.Any(link => link.Tag!.Name == tagName));
+            }
+
+            var venues = await query
                 .IncludeVenueDetails()
                 .ToListAsync()
                 .ConfigureAwait(false);
@@ -659,6 +671,11 @@ namespace TAGWEBAPI.Controllers
                     .OrderBy(category => category.SortOrder)
                     .ThenBy(category => category.Name)
                     .Select(category => new { category.VenueCategoryID, category.Name, category.Slug, category.IsActive })
+                    .ToList(),
+                Tags = (venue.TagLinks ?? new List<Linker_VenueToTag>())
+                    .Where(link => link.Tag != null)
+                    .Select(link => link.Tag!.Name)
+                    .OrderBy(name => name, StringComparer.Ordinal)
                     .ToList(),
                 venue.Address,
                 venue.ExternalLink,

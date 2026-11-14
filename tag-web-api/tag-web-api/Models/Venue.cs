@@ -52,4 +52,6 @@ public class Venue
 
     // Categories (and later tags and regions) are managed through their own endpoints and are never bound from request bodies.
     public virtual ICollection<Linker_VenueToCategory> CategoryLinks { get; set; } = new List<Linker_VenueToCategory>();
+
+    public virtual ICollection<Linker_VenueToTag> TagLinks { get; set; } = new List<Linker_VenueToTag>();
 }
