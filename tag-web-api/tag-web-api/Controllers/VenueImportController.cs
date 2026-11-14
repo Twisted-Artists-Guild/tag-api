@@ -172,8 +172,19 @@ public class VenueImportController : ControllerBase
             }
             else if (row.CategoryHint != null)
             {
-                result.Message = UnmatchedCategoryMessage(row.CategoryHint);
+                AppendMessage(result, UnmatchedCategoryMessage(row.CategoryHint));
             }
+
+            var hintedRegion = FindRegion(existing.Regions, row.RegionHint);
+            if (hintedRegion != null)
+            {
+                this.context.Set<Linker_VenueToRegion>().Add(new Linker_VenueToRegion { Venue = venue, RegionID = hintedRegion.RegionID });
+            }
+            else if (row.RegionHint != null)
+            {
+                AppendMessage(result, UnmatchedRegionMessage(row.RegionHint));
+            }
+
             slugOwners[slug] = row.Name;
             known[row.Key] = new KnownVenue { Venue = venue, IsNew = true, FirstIndex = index };
         }
@@ -246,12 +257,47 @@ public class VenueImportController : ControllerBase
             }
             else
             {
-                result.Message = UnmatchedCategoryMessage(row.CategoryHint);
+                AppendMessage(result, UnmatchedCategoryMessage(row.CategoryHint));
+            }
+        }
+
+        // The same rule for the region hint: it only fills in a venue that has no shared region yet.
+        if (row.RegionHint != null && !match.IsNew && !existing.VenuesWithRegions.Contains(venue.VenueID))
+        {
+            var hintedRegion = FindRegion(existing.Regions, row.RegionHint);
+            if (hintedRegion != null)
+            {
+                this.context.Set<Linker_VenueToRegion>().Add(new Linker_VenueToRegion { VenueID = venue.VenueID, RegionID = hintedRegion.RegionID });
+                existing.VenuesWithRegions.Add(venue.VenueID);
+                changed = true;
+            }
+            else
+            {
+                AppendMessage(result, UnmatchedRegionMessage(row.RegionHint));
             }
         }
 
         result.Status = changed ? StatusUpdated : StatusUnchanged;
     }
+
+    private static void AppendMessage(VenueImportRowResult result, string message)
+    {
+        result.Message = string.IsNullOrEmpty(result.Message) ? message : $"{result.Message} {message}";
+    }
+
+    // The hint matches an active region by name or by slug, ignoring case.
+    private static Region? FindRegion(IEnumerable<Region> regions, string? hint)
+    {
+        if (hint == null)
+        {
+            return null;
+        }
+
+        var slug = VenueController.ToSlug(hint);
+        return regions.FirstOrDefault(r => string.Equals(r.Name, hint, StringComparison.OrdinalIgnoreCase) || (slug.Length > 0 && r.Slug == slug));
+    }
+
+    private static string UnmatchedRegionMessage(string hint) => $"Region hint '{hint}' did not match a shared region; the venue has no region yet (the text is still saved on its address).";
 
     // The hint matches an active category by name or by slug, ignoring case.
     private static VenueCategory? FindCategory(IEnumerable<VenueCategory> categories, string? hint)
@@ -324,7 +370,21 @@ public class VenueImportController : ControllerBase
             .ToListAsync()
             .ConfigureAwait(false);
 
-        return new ExistingVenues(slugOwners, byKey, owned.ToHashSet(), categories, venuesWithCategories.ToHashSet());
+        var venuesWithRegions = await this.context.Set<Linker_VenueToRegion>()
+            .AsNoTracking()
+            .Where(l => candidateIds.Contains(l.VenueID))
+            .Select(l => l.VenueID)
+            .Distinct()
+            .ToListAsync()
+            .ConfigureAwait(false);
+
+        var regions = await this.context.Set<Region>()
+            .AsNoTracking()
+            .Where(r => r.IsActive)
+            .ToListAsync()
+            .ConfigureAwait(false);
+
+        return new ExistingVenues(slugOwners, byKey, owned.ToHashSet(), categories, venuesWithCategories.ToHashSet(), regions, venuesWithRegions.ToHashSet());
     }
 
     // Written after the batch is saved so the entry can list the venue ids it created and updated.
@@ -532,7 +592,9 @@ public class VenueImportController : ControllerBase
         Dictionary<string, KnownVenue> ByKey,
         HashSet<int> OwnedVenueIds,
         List<VenueCategory> Categories,
-        HashSet<int> VenuesWithCategories);
+        HashSet<int> VenuesWithCategories,
+        List<Region> Regions,
+        HashSet<int> VenuesWithRegions);
 }
 
 /// <summary>A batch of venues to import.</summary>
