@@ -81,3 +81,9 @@ The category, tag and region links already have indexes from their own stories.
 
 The name search matches anywhere in the name, which an ordinary index can't serve. It is fast enough while the directory holds thousands of venues.
 If it grows much larger, add a trigram index (see the comment at the top of the SQL script).
+
+## Sample venues for testing
+
+`sql_scripts/335_sample_venues.sql` adds 16 published sample venues (names start with `Sample `) across 9 states, with categories, amenity tags and regions, plus one unpublished and one blocked venue that the directory must not show. It can be run more than once; venues that already exist are skipped.
+It needs the category, tag and region scripts (325, 326 and 327) to have run first.
+`sql_scripts/335_sample_venues_remove.sql` removes them again. Use these on a shared or production database only on purpose, because the sample venues are visible in the public directory until they are removed.
