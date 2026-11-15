@@ -31,6 +31,11 @@ public class Venue
     [ForeignKey("Picture")]
     public int? LogoPicID { get; set; }
 
+    // The active profile and cover pictures, chosen from the venue's profile and cover media folders.
+    public int? ProfilePicID { get; set; }
+
+    public int? CoverPicID { get; set; }
+
     // Rich text; Description_Plaintext is maintained by the database trigger.
     public string? Description { get; set; }
 
@@ -49,6 +54,8 @@ public class Venue
     public virtual ExternalLink? ExternalLink { get; set; }
     public virtual PhoneContact? PhoneContact { get; set; }
     public virtual Picture? LogoPic { get; set; }
+    public virtual Picture? ProfilePic { get; set; }
+    public virtual Picture? CoverPic { get; set; }
 
     // Categories (and later tags and regions) are managed through their own endpoints and are never bound from request bodies.
     public virtual ICollection<Linker_VenueToCategory> CategoryLinks { get; set; } = new List<Linker_VenueToCategory>();

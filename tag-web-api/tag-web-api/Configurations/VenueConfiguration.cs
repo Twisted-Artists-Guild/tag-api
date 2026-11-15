@@ -38,6 +38,22 @@ namespace TAGWEBAPI.Models.Configurations
                 .HasForeignKey(v => v.LogoPicID)
                 .OnDelete(DeleteBehavior.SetNull);
 
+            builder.Property(v => v.ProfilePicID)
+                .IsRequired(false);
+
+            builder.HasOne(v => v.ProfilePic)
+                .WithMany()
+                .HasForeignKey(v => v.ProfilePicID)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            builder.Property(v => v.CoverPicID)
+                .IsRequired(false);
+
+            builder.HasOne(v => v.CoverPic)
+                .WithMany()
+                .HasForeignKey(v => v.CoverPicID)
+                .OnDelete(DeleteBehavior.SetNull);
+
             builder.Property(v => v.IsPublished)
                 .IsRequired()
                 .HasDefaultValue(false);

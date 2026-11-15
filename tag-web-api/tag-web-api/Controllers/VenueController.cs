@@ -556,6 +556,76 @@ namespace TAGWEBAPI.Controllers
             return this.NoContent();
         }
 
+        // Saves which picture is the venue's active profile or cover picture. Owners and staff only. The picture must be a
+        // file directly inside this venue's own folder for that kind, so a venue can never point at another venue's image,
+        // at an archived older version, or at a file somewhere else. A null pictureID clears the active picture.
+        [HttpPut("{id:int}/pictures/{kind}")]
+        public async Task<IActionResult> PutActivePicture(int id, string kind, [FromBody] VenueActivePictureRequest request)
+        {
+            var normalizedKind = kind?.Trim().ToLowerInvariant();
+            if (normalizedKind != "profile" && normalizedKind != "cover")
+            {
+                return this.NotFound();
+            }
+
+            var userId = VenueAccess.GetUserId(this.User);
+            if (userId == null)
+            {
+                return this.Unauthorized();
+            }
+
+            var venue = await this.context.Set<Venue>().FirstOrDefaultAsync(v => v.VenueID == id).ConfigureAwait(false);
+            if (venue == null)
+            {
+                return this.NotFound();
+            }
+
+            // Permission is decided before anything about the request is validated or applied.
+            if (!await VenueAccess.CanManageAsync(this.context, id, userId.Value).ConfigureAwait(false))
+            {
+                return this.Forbidden("You are not allowed to change the pictures of this venue.");
+            }
+
+            if (request == null)
+            {
+                return this.BadRequest("A request body is required.");
+            }
+
+            if (request.PictureID.HasValue)
+            {
+                var picture = await this.context.Set<Picture>().AsNoTracking().FirstOrDefaultAsync(p => p.PictureID == request.PictureID.Value).ConfigureAwait(false);
+                if (picture == null)
+                {
+                    return this.BadRequest($"Picture #{request.PictureID.Value} does not exist.");
+                }
+
+                if (!IsPictureInVenueFolder(picture, id, normalizedKind))
+                {
+                    return this.BadRequest($"The picture must be an image in this venue's {normalizedKind} folder.");
+                }
+            }
+
+            if (normalizedKind == "profile")
+            {
+                venue.ProfilePicID = request.PictureID;
+            }
+            else
+            {
+                venue.CoverPicID = request.PictureID;
+            }
+
+            await this.context.SaveChangesAsync().ConfigureAwait(false);
+
+            await this.TryWriteAuditLogAsync(
+                shortText: "Venue picture changed",
+                tags: $"scope=audit;entity=venue;event=picture;operation=set-{normalizedKind};result=success;channel=db",
+                loggedData: $"venueId={venue.VenueID};kind={normalizedKind};pictureId={request.PictureID?.ToString(CultureInfo.InvariantCulture) ?? "none"}",
+                userId: userId)
+                .ConfigureAwait(false);
+
+            return this.Ok(new { profilePicID = venue.ProfilePicID, coverPicID = venue.CoverPicID });
+        }
+
         [HttpDelete("{id}")]
         public async Task<IActionResult> DeleteVenue(int id)
         {
@@ -676,6 +746,40 @@ namespace TAGWEBAPI.Controllers
         private Task<bool> AddressExistsAsync(int addressId)
         {
             return this.context.Set<Address>().AnyAsync(a => a.AddressID == addressId);
+        }
+
+        // True when the picture is a file directly inside platformpics/venue/{id}/{kind}/ (not in an archive subfolder).
+        public static bool IsPictureInVenueFolder(Picture picture, int venueId, string kind)
+        {
+            var folder = $"/platformpics/venue/{venueId.ToString(CultureInfo.InvariantCulture)}/{kind}/";
+            foreach (var candidate in new[] { picture.URL, picture.NormalizedURL })
+            {
+                if (string.IsNullOrWhiteSpace(candidate))
+                {
+                    continue;
+                }
+
+                var path = candidate.Split('?', '#')[0];
+                if (!Uri.TryCreate(path, UriKind.Absolute, out var uri))
+                {
+                    return false;
+                }
+
+                var absolutePath = Uri.UnescapeDataString(uri.AbsolutePath);
+                var index = absolutePath.IndexOf(folder, StringComparison.OrdinalIgnoreCase);
+                if (index < 0)
+                {
+                    return false;
+                }
+
+                var fileName = absolutePath.Substring(index + folder.Length);
+                if (fileName.Length == 0 || fileName.Contains('/', StringComparison.Ordinal))
+                {
+                    return false;
+                }
+            }
+
+            return !string.IsNullOrWhiteSpace(picture.URL) || !string.IsNullOrWhiteSpace(picture.NormalizedURL);
         }
 
         // The address a venue gets when its slug is reserved, before the owner has entered the real one.
@@ -810,6 +914,10 @@ namespace TAGWEBAPI.Controllers
                 venue.IsModerationBlocked,
                 venue.LogoPicID,
                 venue.LogoPic,
+                venue.ProfilePicID,
+                venue.ProfilePic,
+                venue.CoverPicID,
+                venue.CoverPic,
                 Categories = (venue.CategoryLinks ?? new List<Linker_VenueToCategory>())
                     .Where(link => link.Category != null)
                     .Select(link => link.Category!)
