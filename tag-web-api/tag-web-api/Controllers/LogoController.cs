@@ -387,6 +387,7 @@ public class LogoController : ControllerBase
         return entityType switch
         {
             "artist" => await _context.Set<Linker_UserToArtist>().AsNoTracking().AnyAsync(l => l.UserID == userId && l.ArtistID == entityId).ConfigureAwait(false),
+            "venue" => await VenueAccess.IsOwnerAsync(_context, entityId, userId).ConfigureAwait(false),
             "event" => await _context.Events.AsNoTracking().AnyAsync(e => e.EventID == entityId && _context.Set<Linker_UserToArtist>().AsNoTracking().Any(l => l.UserID == userId && l.ArtistID == e.ArtistID)).ConfigureAwait(false),
             _ => false,
         };

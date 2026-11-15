@@ -60,6 +60,12 @@ namespace TAGWEBAPI.Controllers
         public int UserID { get; set; }
     }
 
+    /// <summary>The picture to make active; null clears the active picture.</summary>
+    public class VenueActivePictureRequest
+    {
+        public int? PictureID { get; set; }
+    }
+
     /// <summary>A user who manages a venue. Only the fields staff need to tell users apart are exposed.</summary>
     public class VenueOwnerDto
     {
@@ -119,6 +125,8 @@ namespace TAGWEBAPI.Controllers
             return query
                 .Include(v => v.Address)
                 .Include(v => v.LogoPic)
+                .Include(v => v.ProfilePic)
+                .Include(v => v.CoverPic)
                 .Include(v => v.CategoryLinks).ThenInclude(l => l.Category)
                 .Include(v => v.TagLinks).ThenInclude(l => l.Tag)
                 .Include(v => v.RegionLinks).ThenInclude(l => l.Region);

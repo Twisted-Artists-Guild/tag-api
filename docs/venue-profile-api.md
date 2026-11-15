@@ -46,3 +46,23 @@ The description is stored exactly as sent, up to 20,000 characters. The website 
 ## Moderation
 
 Only staff can change `isModerationBlocked`. A client that sends the stored value back unchanged is accepted, so the wizard can send the whole venue.
+
+## Pictures (story #333)
+
+A venue has three stored pictures: `logoPicID`, `profilePicID` and `coverPicID`. Venue reads return each ID and the picture itself (`logoPic`, `profilePic`, `coverPic`). The files live in `platformpics/venue/{id}/{profile|cover|logo|gallery}/`; the gallery is just the files in its folder.
+
+`sql_scripts/333_venue_profile_cover_pictures.sql` adds the two new columns. Run it on dev and production before deploying; until it has run, venue reads fail because the columns are missing.
+
+| Call | Purpose |
+|------|---------|
+| `PUT /api/venue/{id}/pictures/profile` and `.../cover` | Make a picture the active profile or cover. Body `{ "pictureID": 12 }`; `null` clears it. Returns `{ profilePicID, coverPicID }`. |
+| `POST /api/Logo/Venue/{id}` | Set the logo (existing). Venue owners can now call it; before, only staff could. |
+
+Rules for the profile and cover call:
+
+- Owners and staff only; anyone else gets `403` before the body is read.
+- The picture must exist and be a file directly inside this venue's own folder for that kind. A picture in another venue's folder, in the wrong folder, in an archive subfolder, or somewhere else is rejected with `400`.
+- Only `profile` and `cover` are valid; any other kind is `404`.
+- Each change writes an audit log row.
+
+Uploading, renaming and deleting the files themselves happen in the website's `/api/image/*` routes, which check ownership with `GET /api/venue/{id}/access`.
