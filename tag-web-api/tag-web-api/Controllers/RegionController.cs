@@ -282,6 +282,110 @@ public class RegionController : ControllerBase
         return this.Ok(regions.OrderBy(r => r.Name, StringComparer.Ordinal).Select(ToDto));
     }
 
+    /// <summary>
+    /// Replaces the regions of an artist. The artist's own users and staff only. Regions the artist already has can stay
+    /// even when they were deactivated, but a deactivated region can't be newly added.
+    /// </summary>
+    [HttpPut("~/api/Artist/{artistId:int}/regions")]
+    public async Task<ActionResult<IEnumerable<RegionDto>>> SetArtistRegions(int artistId, [FromBody] ArtistRegionsRequest request)
+    {
+        var userId = VenueAccess.GetUserId(this.User);
+        if (userId == null)
+        {
+            return this.Unauthorized();
+        }
+
+        if (!await this.context.Set<Artist>().AnyAsync(a => a.ArtistID == artistId).ConfigureAwait(false))
+        {
+            return this.NotFound();
+        }
+
+        // Permission is decided before anything about the request is validated or applied.
+        if (!await ArtistAccess.CanManageAsync(this.context, artistId, userId.Value).ConfigureAwait(false))
+        {
+            return this.StatusCode(StatusCodes.Status403Forbidden, new { message = "You are not allowed to change the regions of this artist." });
+        }
+
+        if (request?.RegionIds == null)
+        {
+            return this.BadRequest(new { message = "RegionIds is required (use an empty list to clear the regions)." });
+        }
+
+        var wanted = request.RegionIds.Distinct().ToList();
+        if (wanted.Any(id => id <= 0))
+        {
+            return this.BadRequest(new { message = "Region ids must be positive numbers." });
+        }
+
+        var regions = await this.context.Set<Region>()
+            .Where(r => wanted.Contains(r.RegionID))
+            .ToListAsync()
+            .ConfigureAwait(false);
+
+        var unknown = wanted.Except(regions.Select(r => r.RegionID)).ToList();
+        if (unknown.Count > 0)
+        {
+            return this.BadRequest(new { message = $"Unknown region id: {string.Join(", ", unknown)}." });
+        }
+
+        var links = await this.context.Set<Linker_ArtistToRegion>()
+            .Where(l => l.ArtistID == artistId)
+            .ToListAsync()
+            .ConfigureAwait(false);
+        var currentIds = links.Select(l => l.RegionID).ToHashSet();
+
+        var unavailable = regions.FirstOrDefault(r => !r.IsActive && !currentIds.Contains(r.RegionID));
+        if (unavailable != null)
+        {
+            return this.BadRequest(new { message = $"The region '{unavailable.Name}' is no longer available." });
+        }
+
+        var removed = links.Where(l => !wanted.Contains(l.RegionID)).ToList();
+        var added = wanted.Where(id => !currentIds.Contains(id)).ToList();
+        if (removed.Count > 0 || added.Count > 0)
+        {
+            this.context.Set<Linker_ArtistToRegion>().RemoveRange(removed);
+            foreach (var regionId in added)
+            {
+                this.context.Set<Linker_ArtistToRegion>().Add(new Linker_ArtistToRegion { ArtistID = artistId, RegionID = regionId });
+            }
+
+            this.context.Set<Log>().Add(new Log
+            {
+                ShortText = "Artist regions changed",
+                Tags = "scope=audit;entity=artist;event=region;operation=set;result=success;channel=db",
+                Critical = false,
+                LoggedData = $"artistId={artistId};actingUserId={userId.Value};added={string.Join(",", added)};removed={string.Join(",", removed.Select(l => l.RegionID))}",
+                UserID = userId.Value,
+                LogTimestamp = DateTime.UtcNow,
+            });
+            await this.context.SaveChangesAsync().ConfigureAwait(false);
+        }
+
+        return this.Ok(regions.OrderBy(r => r.Name, StringComparer.Ordinal).Select(ToDto));
+    }
+
+    /// <summary>
+    /// Staff only. Links artists to the shared regions their old free-text region matches. It previews by default
+    /// (dryRun=true); send dryRun=false to apply. The report lists the text that matched nothing, which stays on the address.
+    /// </summary>
+    [HttpPost("admin/migrate-artist-regions")]
+    public async Task<ActionResult<ArtistRegionMigrationReport>> MigrateArtistRegions([FromQuery] bool dryRun = true)
+    {
+        var userId = VenueAccess.GetUserId(this.User);
+        if (userId == null)
+        {
+            return this.Unauthorized();
+        }
+
+        if (!await VenueAccess.IsStaffAsync(this.context, userId.Value).ConfigureAwait(false))
+        {
+            return this.StatusCode(StatusCodes.Status403Forbidden, new { message = "Only staff can migrate artist regions." });
+        }
+
+        return this.Ok(await ArtistRegionMigration.RunAsync(this.context, apply: !dryRun, actingUserId: userId.Value).ConfigureAwait(false));
+    }
+
     // Returns an error message, or null and the trimmed, validated values.
     private static string? Validate(RegionRequest? request, out string? name, out string? type, out List<string>? states)
     {
@@ -391,6 +495,11 @@ public class RegionActiveRequest
 }
 
 public class VenueRegionsRequest
+{
+    public List<int>? RegionIds { get; set; }
+}
+
+public class ArtistRegionsRequest
 {
     public List<int>? RegionIds { get; set; }
 }

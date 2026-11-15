@@ -8,7 +8,7 @@ Run `sql_scripts/327_regions.sql` before deploying. It creates the tables, adds 
 the 50 states and the District of Columbia as statewide regions, plus **Atlanta Metro** (within Georgia) as an example of an area within a state.
 It is safe to re-run and never overwrites a region that staff renamed, edited or deactivated.
 
-The old free-text `Addresses.Region` column is **not** changed. It stays until the artist migration story (#328) is complete.
+The old free-text `Addresses.Region` column is **never changed or removed**, not even by the artist migration (below): the migration only reads it.
 
 ## Types and states
 
@@ -31,6 +31,8 @@ Types are accepted in any letter case and returned as `Statewide`, `Multistate` 
 | `PUT /api/Region/{id}` | staff | Edit the name, type and states (send all three). The slug does **not** change, so shared filter links keep working. |
 | `PATCH /api/Region/{id}/active` | staff | Body `{ "isActive": false }` deactivates, `true` reactivates. |
 | `PUT /api/Venue/{venueId}/regions` | venue owner or staff | Replaces the venue's regions. Body `{ "regionIds": [1, 2] }`. An empty list clears them. |
+| `PUT /api/Artist/{artistId}/regions` | the artist's own users or staff | Replaces the artist's regions. Same body and rules as the venue call. |
+| `POST /api/Region/admin/migrate-artist-regions` | staff | Links artists to regions from their old free-text region. Previews unless `?dryRun=false` (see Artists). |
 
 Staff means a user flagged as a moderator (`Users.Moderator`), taken from the token. Anonymous callers get `401`, signed-in callers who may not do it get `403`.
 
@@ -44,8 +46,41 @@ Staff means a user flagged as a moderator (`Users.Moderator`), taken from the to
 
 ## Artists
 
-`Linker_ArtistToRegion` exists now so venues and artists use the same region records. Choosing regions on the artist screens, the public artist profile, and the migration of the old
-free-text region values are part of the artists story (#328).
+Artists use the same regions as venues, through `Linker_ArtistToRegion` (story #328). Artist responses return the artist's regions in the same shape as venues:
+
+- `GET /api/artist/byID/{id}`, `GET /api/artist/{slug}`: `regions` at the top level of the artist.
+- `GET /api/artist/{slug}/profile` (the public profile): `artist.regions`.
+- The artist list (`GET /api/artist`) returns `regions: null`, meaning "not loaded", not "none".
+
+`PUT /api/Artist/{artistId}/regions` replaces the artist's regions with `{ "regionIds": [1, 2] }`. Only users linked to the artist and staff may call it; others get `403` before the body is read. Unknown ids return `400`, a deactivated region can stay but not be newly added, and every change writes an audit row.
+
+### Migrating the old free-text region
+
+`POST /api/Region/admin/migrate-artist-regions` (staff only) turns the region text artists typed on their **public** addresses (`Addresses.Region`) into region links.
+
+- **It previews by default.** Send `?dryRun=false` to apply. Run the preview first and read the report.
+- **Only exact matches are made.** Text is compared ignoring case, spaces, dots and dashes. It matches a region's name or slug, or a state (code or name), which stands for that state's statewide region. Text with several values (`GA, NC`, `GA/NC`, `Georgia and North Carolina`) is split, and each part is matched on its own. "Atlanta" does not become "Atlanta Metro"; nothing is guessed.
+- **Only active regions** are used, because a deactivated region can't be newly added.
+- **Private addresses are never read**, so a private address can't turn into a public region.
+- **An artist who already has regions is left alone.** It is safe to run again; it only adds links an artist does not have.
+- **Nothing is lost.** The text stays on the address.
+- It writes an audit row when it applies changes.
+
+The report:
+
+```json
+{
+  "dryRun": true,
+  "artistsWithRegionText": 5,
+  "artistsSkippedAlreadyHadRegions": 1,
+  "artistsMigrated": 3,
+  "artistsWithNoMatch": 2,
+  "linksAdded": 4,
+  "unmatched": [ { "text": "Narnia", "artistCount": 3, "artistIds": [2, 4, 6] } ]
+}
+```
+
+`unmatched` lists the text that matched nothing, most common first, with up to 10 artist ids to look at. To handle them, either add or rename a region so the text matches, then run the migration again, or ask the artist to choose a region on their profile.
 
 ## In venue responses
 
