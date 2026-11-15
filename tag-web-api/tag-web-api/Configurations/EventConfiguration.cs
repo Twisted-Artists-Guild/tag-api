@@ -77,7 +77,8 @@ public class EventConfiguration : IEntityTypeConfiguration<Event>
         builder.HasOne(e => e.Artist)
             .WithMany()
             .HasForeignKey(e => e.ArtistID)
-            .OnDelete(DeleteBehavior.Restrict);
+            .OnDelete(DeleteBehavior.Restrict)
+            .IsRequired(false);
 
         builder.HasOne(e => e.EventCategory)
             .WithMany()

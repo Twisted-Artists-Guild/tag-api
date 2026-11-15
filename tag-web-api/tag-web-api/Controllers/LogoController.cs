@@ -388,7 +388,10 @@ public class LogoController : ControllerBase
         {
             "artist" => await _context.Set<Linker_UserToArtist>().AsNoTracking().AnyAsync(l => l.UserID == userId && l.ArtistID == entityId).ConfigureAwait(false),
             "venue" => await VenueAccess.IsOwnerAsync(_context, entityId, userId).ConfigureAwait(false),
-            "event" => await _context.Events.AsNoTracking().AnyAsync(e => e.EventID == entityId && _context.Set<Linker_UserToArtist>().AsNoTracking().Any(l => l.UserID == userId && l.ArtistID == e.ArtistID)).ConfigureAwait(false),
+            "event" => await _context.Events.AsNoTracking().AnyAsync(e => e.EventID == entityId
+                && (e.ArtistID == null
+                    ? _context.Set<Linker_UserToVenue>().AsNoTracking().Any(l => l.UserID == userId && l.VenueID == e.VenueID)
+                    : _context.Set<Linker_UserToArtist>().AsNoTracking().Any(l => l.UserID == userId && l.ArtistID == e.ArtistID))).ConfigureAwait(false),
             _ => false,
         };
     }
