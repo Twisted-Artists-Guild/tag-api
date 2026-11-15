@@ -27,15 +27,37 @@ namespace TAGWEBAPI.Controllers
             _context = context;
         }
 
+        // Lists published events. With venueId and/or upcoming=true the list is narrowed, ordered by start time and
+        // capped (50 by default, never more than 50), so a venue page can show what is coming up without loading everything.
         [HttpGet]
-        public async Task<ActionResult<IEnumerable<Event>>> GetEvents()
+        public async Task<ActionResult<IEnumerable<Event>>> GetEvents([FromQuery] int? venueId = null, [FromQuery] bool upcoming = false, [FromQuery] int? limit = null)
         {
             if (_context.Events == null)
             {
                 return NotFound();
             }
-            var events = await _context.Events
-                .Where(e => e.StatusID == EventStatus.Published)
+
+            var query = _context.Events.Where(e => e.StatusID == EventStatus.Published);
+            var narrowed = venueId.HasValue || upcoming;
+
+            if (venueId.HasValue)
+            {
+                query = query.Where(e => e.VenueID == venueId.Value);
+            }
+
+            if (upcoming)
+            {
+                // An event that has started but not ended is still on.
+                var now = DateTime.UtcNow;
+                query = query.Where(e => e.EndTime >= now || e.StartTime >= now);
+            }
+
+            if (narrowed)
+            {
+                query = query.OrderBy(e => e.StartTime).Take(Math.Clamp(limit ?? 50, 1, 50));
+            }
+
+            var events = await query
                 .Include(e => e.Artist)
                 .Include(e => e.Venue)
                 .Include(e => e.LogoPic)
