@@ -27,10 +27,12 @@ namespace TAGWEBAPI.Controllers
         private const int MaxPointOfContactLength = 1000;
 
         private readonly TAGDBContext _context;
+        private readonly ILogger<EventController>? _logger;
 
-        public EventController(TAGDBContext context)
+        public EventController(TAGDBContext context, ILogger<EventController>? logger = null)
         {
             _context = context;
+            _logger = logger;
         }
 
         // Lists published events. With venueId and/or upcoming=true the list is narrowed, ordered by start time and
@@ -43,7 +45,8 @@ namespace TAGWEBAPI.Controllers
                 return NotFound();
             }
 
-            var query = _context.Events.Where(e => e.StatusID == EventStatus.Published);
+            // An event is only as public as its venue: events of a venue that is a draft or blocked by staff are hidden too.
+            var query = _context.Events.Where(e => e.StatusID == EventStatus.Published && e.Venue.IsPublished && !e.Venue.IsModerationBlocked);
             var narrowed = venueId.HasValue || upcoming;
 
             if (venueId.HasValue)
@@ -95,6 +98,12 @@ namespace TAGWEBAPI.Controllers
 
             // A draft or an event waiting for review is private to the people who manage it.
             if (!canManage && (@event.StatusID == EventStatus.Draft || @event.StatusID == EventStatus.PendingReview))
+            {
+                return NotFound();
+            }
+
+            // So is an event of a venue that is not public.
+            if (!canManage && (@event.Venue == null || !@event.Venue.IsPublished || @event.Venue.IsModerationBlocked))
             {
                 return NotFound();
             }
@@ -154,7 +163,7 @@ namespace TAGWEBAPI.Controllers
                 .Include(e => e.Artist)
                 .Include(e => e.Venue)
                 .Include(e => e.LogoPic)
-                .FirstOrDefaultAsync(e => e.Path == path && e.StatusID == EventStatus.Published);
+                .FirstOrDefaultAsync(e => e.Path == path && e.StatusID == EventStatus.Published && e.Venue.IsPublished && !e.Venue.IsModerationBlocked);
 
             if (@event == null)
             {
@@ -250,7 +259,8 @@ namespace TAGWEBAPI.Controllers
             }
             catch (DbUpdateException ex)
             {
-                return Conflict(new { message = "The event could not be saved.", error = ex.InnerException?.Message ?? ex.Message });
+                _logger?.LogError(ex, "Failed to save event {EventId}", id);
+                return Conflict(new { message = "The event could not be saved." });
             }
 
             return NoContent();
@@ -396,7 +406,8 @@ namespace TAGWEBAPI.Controllers
             }
             catch (DbUpdateException ex)
             {
-                return Conflict(new { message = "The event could not be saved.", error = ex.InnerException?.Message ?? ex.Message });
+                _logger?.LogError(ex, "Failed to create an event at venue {VenueId}", venueId);
+                return Conflict(new { message = "The event could not be saved." });
             }
 
             await WriteAuditAsync("Event created", "create", $"eventId={venueEvent.EventID};venueId={venueId};actingUserId={userId.Value}", userId.Value);
@@ -600,8 +611,8 @@ namespace TAGWEBAPI.Controllers
             }
             catch (DbUpdateException ex)
             {
-                return StatusCode(StatusCodes.Status500InternalServerError,
-                    new { message = "Failed to reserve slug", error = ex.InnerException?.Message ?? ex.Message });
+                _logger?.LogError(ex, "Failed to reserve an event slug");
+                return StatusCode(StatusCodes.Status500InternalServerError, new { message = "The event could not be saved." });
             }
         }
 
@@ -673,8 +684,8 @@ namespace TAGWEBAPI.Controllers
             }
             catch (DbUpdateException ex)
             {
-                return StatusCode(StatusCodes.Status500InternalServerError,
-                    new { message = "Failed to update slug", error = ex.InnerException?.Message ?? ex.Message });
+                _logger?.LogError(ex, "Failed to update the slug of event {EventId}", id);
+                return StatusCode(StatusCodes.Status500InternalServerError, new { message = "The event path could not be saved." });
             }
         }
 

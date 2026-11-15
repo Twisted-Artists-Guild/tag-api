@@ -42,6 +42,11 @@ Twisted Artists Guild is a digital cooperative focused on artist ownership, equi
 - `/Tests` — xUnit test suite
 
 ### API Guides
+- [Venues: overview](docs/venues.md) — what venues are, the flow, roles, pages, every endpoint, database scripts, security rules and tests
+- [Venue directory](docs/venue-directory-api.md) — the public list with search and filters
+- [Venue profile](docs/venue-profile-api.md) — profile, address, publishing, public page and pictures
+- [Venue categories](docs/venue-categories-api.md), [venue tags](docs/venue-tags-api.md) and [regions](docs/regions-api.md) — how venues (and artists) are found
+- [Venue events](docs/venue-events-api.md) — events hosted by a venue and the publish lifecycle
 - [Venue import API](docs/venue-import-api.md) — staff bulk import for seeding venues (for the crawler)
 
 ---

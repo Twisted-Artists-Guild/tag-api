@@ -350,6 +350,22 @@ namespace TAGWEBAPI.Controllers
                 return this.BadRequest(AddressNotFoundMessage);
             }
 
+            // A new venue can only use a fresh address, never one that already belongs to a venue or a contact. The website
+            // and phone rows are linked later, through the contacts.
+            if (!await VenueAccess.IsStaffAsync(this.context, userId.Value).ConfigureAwait(false))
+            {
+                if (request.ExternalLinkID.HasValue || request.PhoneContactID.HasValue)
+                {
+                    return this.BadRequest("Add the website and phone as contacts after the venue is created.");
+                }
+
+                if (await this.context.Set<Venue>().AnyAsync(v => v.AddressID == request.AddressID).ConfigureAwait(false)
+                    || await this.context.Set<TAGWEBAPI.Models.Contact>().AnyAsync(c => c.AddressID == request.AddressID).ConfigureAwait(false))
+                {
+                    return this.BadRequest("That address is already in use.");
+                }
+            }
+
             // A venue is created unpublished and unblocked; the creator becomes its owner.
             var venue = new Venue
             {
@@ -423,6 +439,23 @@ namespace TAGWEBAPI.Controllers
             if (!await this.AddressExistsAsync(request.AddressID).ConfigureAwait(false))
             {
                 return this.BadRequest(AddressNotFoundMessage);
+            }
+
+            // The address, website and phone belong to the venue. An owner can't point it at someone else's rows: the address
+            // is changed with the address form (which copies a shared address first), and the website and phone can be
+            // kept or cleared. Staff can set any of them.
+            if (!isStaff)
+            {
+                if (request.AddressID != venue.AddressID)
+                {
+                    return this.BadRequest("Change the address with the address form.");
+                }
+
+                if ((request.ExternalLinkID.HasValue && request.ExternalLinkID != venue.ExternalLinkID)
+                    || (request.PhoneContactID.HasValue && request.PhoneContactID != venue.PhoneContactID))
+                {
+                    return this.BadRequest("The website and phone can't be changed here.");
+                }
             }
 
             // A venue is listed as soon as it is published, so it needs the address from the onboarding form first.

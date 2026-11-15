@@ -131,6 +131,16 @@ namespace TAGWEBAPI.Controllers.Contact
             var normalizedContext = context.Trim().ToLowerInvariant();
             var entityType = NormalizeContextToEntityType(normalizedContext);
 
+            // Asking for private contacts of a venue needs the venue's owner (or staff).
+            if (includePrivate && normalizedContext == "venue")
+            {
+                var denied = await this.RequireVenueManagerAsync(entityId).ConfigureAwait(false);
+                if (denied != null)
+                {
+                    return denied;
+                }
+            }
+
             if (!includePrivate && !await this.IsEntityPubliclyVisibleAsync(normalizedContext, entityId).ConfigureAwait(false))
             {
                 return this.NotFound();
@@ -276,6 +286,15 @@ namespace TAGWEBAPI.Controllers.Contact
             if (request.EntityID <= 0)
             {
                 return this.BadRequest("EntityID must be a positive integer.");
+            }
+
+            if (normalizedContext == "venue")
+            {
+                var denied = await this.RequireVenueManagerAsync(request.EntityID).ConfigureAwait(false);
+                if (denied != null)
+                {
+                    return denied;
+                }
             }
 
             var normalizedLabel = request.Label?.Trim();
@@ -457,6 +476,15 @@ namespace TAGWEBAPI.Controllers.Contact
                 return this.BadRequest($"Invalid context. Valid values: {string.Join(", ", ValidContexts)}.");
             }
 
+            if (normalizedContext == "venue")
+            {
+                var denied = await this.RequireVenueManagerAsync(entityId).ConfigureAwait(false);
+                if (denied != null)
+                {
+                    return denied;
+                }
+            }
+
             if (!this.EntityExists(normalizedContext, entityId))
             {
                 return this.NotFound($"{normalizedContext} entity {entityId} was not found.");
@@ -507,6 +535,12 @@ namespace TAGWEBAPI.Controllers.Contact
                 return this.BadRequest(validationError);
             }
 
+            var notAllowed = await this.RequireManagerOfLinkedVenuesAsync(id).ConfigureAwait(false);
+            if (notAllowed != null)
+            {
+                return notAllowed;
+            }
+
             this.context.Entry(contact).State = EntityState.Modified;
 
             try
@@ -533,6 +567,12 @@ namespace TAGWEBAPI.Controllers.Contact
             if (contact == null)
             {
                 return this.NotFound();
+            }
+
+            var notAllowed = await this.RequireManagerOfLinkedVenuesAsync(id).ConfigureAwait(false);
+            if (notAllowed != null)
+            {
+                return notAllowed;
             }
 
             this.context.Set<Contact>().Remove(contact);
@@ -596,6 +636,37 @@ namespace TAGWEBAPI.Controllers.Contact
             return null;
         }
 
+        // Private contacts of a venue are for the venue's managers. Other kinds of contact are unchanged.
+        private async Task<ActionResult?> RequireVenueManagerAsync(int venueId)
+        {
+            var userId = VenueAccess.GetUserId(this.User);
+            if (userId == null)
+            {
+                return this.Unauthorized();
+            }
+
+            if (!await VenueAccess.CanManageAsync(this.context, venueId, userId.Value).ConfigureAwait(false))
+            {
+                return this.StatusCode(StatusCodes.Status403Forbidden, new { message = "You are not allowed to manage the contacts of this venue." });
+            }
+
+            return null;
+        }
+
+        // A contact that is linked to venues can only be changed by the owners of all of those venues, or by staff.
+        private async Task<ActionResult?> RequireManagerOfLinkedVenuesAsync(int contactId)
+        {
+            var venueIds = await VenueDataAccess.VenueIdsForContactAsync(this.context, contactId).ConfigureAwait(false);
+            if (await VenueDataAccess.CanManageAllAsync(this.context, venueIds, VenueAccess.GetUserId(this.User)).ConfigureAwait(false))
+            {
+                return null;
+            }
+
+            return VenueAccess.GetUserId(this.User) == null
+                ? this.Unauthorized()
+                : this.StatusCode(StatusCodes.Status403Forbidden, new { message = "You are not allowed to change this contact." });
+        }
+
         private static string NormalizeContextToEntityType(string normalizedContext)
         {
             return normalizedContext switch
@@ -608,12 +679,16 @@ namespace TAGWEBAPI.Controllers.Contact
             };
         }
 
+        // Contacts that anyone can read: not private, and not a contact of a venue that is not public.
         private IQueryable<Contact> PublicContactsQuery()
         {
             return this.context.Set<Contact>()
                 .AsNoTracking()
                 .Where(c =>
-                    c.EntityLinks.Any(l => l.Scope != ContactScope.Private));
+                    c.EntityLinks.Any(l => l.Scope != ContactScope.Private))
+                .Where(c => !c.EntityLinks.Any(l =>
+                    l.EntityType == LinkedEntityTypes.Venue
+                    && !this.context.Set<Venue>().Any(v => v.VenueID == l.EntityID && v.IsPublished && !v.IsModerationBlocked)));
         }
 
         private IQueryable<Linker_EntityToContact> PublicEntityLinksQuery()
