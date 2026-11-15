@@ -266,6 +266,23 @@ public class VenueProfileTests
         Assert.IsType<NotFoundResult>(await CreateController(context, OwnerId).GetVenueAccess(404));
     }
 
+    // ---- the venue as the edit form loads it
+
+    [Fact]
+    public async Task GetVenueById_IncludesTheAddress_ForTheOwnerOfADraft()
+    {
+        var options = await SeedAsync(nameof(GetVenueById_IncludesTheAddress_ForTheOwnerOfADraft));
+        await using var context = new TAGDBContext(options);
+
+        var result = await CreateController(context, OwnerId).GetVenueById(1);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var address = Prop(ok.Value, "Address") as Address;
+        Assert.NotNull(address);
+        Assert.Equal("1 Main St", address!.AddressLine1);
+        Assert.Equal("Atlanta", address.City);
+    }
+
     // ---- publishing needs a real address
 
     [Fact]

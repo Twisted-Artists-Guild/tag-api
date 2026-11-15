@@ -117,6 +117,7 @@ namespace TAGWEBAPI.Controllers
         public static IQueryable<Venue> IncludeVenueDetails(this IQueryable<Venue> query)
         {
             return query
+                .Include(v => v.Address)
                 .Include(v => v.LogoPic)
                 .Include(v => v.CategoryLinks).ThenInclude(l => l.Category)
                 .Include(v => v.TagLinks).ThenInclude(l => l.Tag)
