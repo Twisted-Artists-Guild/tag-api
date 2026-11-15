@@ -10,7 +10,7 @@ Who may change a venue: its owners and staff (users flagged as moderators). Perm
 |------|---------|
 | `GET /api/venue/byID/{id}`, `GET /api/venue/by-slug/{slug}` | Load the venue with its address, categories, tags and regions. Drafts are only returned to owners and staff. |
 | `GET /api/venue/{id}/access` | Whether the caller may edit this venue: `{ canManage, isStaff, isOwner }`. Used by the edit pages to turn everyone else away. `401` when signed out, `404` for an unknown venue. |
-| `PUT /api/venue/{id}` | Name, description (rich text), events-page URL and the published flag. |
+| `PUT /api/venue/{id}` | Name, description (rich text), events-page URL and the published flag. The body repeats the venue's `addressID`, `externalLinkID` and `phoneContactID`. An owner can send the stored values (or no website or phone) but `400` for any other id, because the address is changed with the address call below and a venue can't point at someone else's rows. Staff can set them. |
 | `PUT /api/venue/{id}/address` | The street address (below). |
 | `PUT /api/venue/{id}/categories` | `{ "categoryIds": [1, 2] }`. See `venue-categories-api.md`. |
 | `PUT /api/venue/{id}/tags` | `{ "tags": ["parking", "stage"] }`. See `venue-tags-api.md`. |

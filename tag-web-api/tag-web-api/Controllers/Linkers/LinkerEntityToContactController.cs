@@ -24,7 +24,7 @@ namespace TAGWEBAPI.Controllers.Contact
         [HttpGet]
         public async Task<ActionResult<IEnumerable<Linker_EntityToContact>>> GetLinks()
         {
-            return await this.context.Set<Linker_EntityToContact>()
+            return await (await this.VisibleLinksAsync().ConfigureAwait(false))
                 .Include(l => l.Contact)
                 .OrderBy(l => l.DisplayOrder)
                 .ThenBy(l => l.Linker_EntityToContactID)
@@ -35,7 +35,7 @@ namespace TAGWEBAPI.Controllers.Contact
         [HttpGet("{id}")]
         public async Task<ActionResult<Linker_EntityToContact>> GetLink(int id)
         {
-            var link = await this.context.Set<Linker_EntityToContact>()
+            var link = await (await this.VisibleLinksAsync().ConfigureAwait(false))
                 .Include(l => l.Contact)
                 .FirstOrDefaultAsync(l => l.Linker_EntityToContactID == id)
                 .ConfigureAwait(false);
@@ -56,7 +56,7 @@ namespace TAGWEBAPI.Controllers.Contact
                 return this.BadRequest($"Invalid entity type '{entityType}'. Valid types: {string.Join(", ", LinkedEntityTypes.All)}");
             }
 
-            var links = await this.context.Set<Linker_EntityToContact>()
+            var links = await (await this.VisibleLinksAsync().ConfigureAwait(false))
                 .Include(l => l.Contact)
                 .Where(l => l.EntityType == entityType && l.EntityID == entityId)
                 .OrderBy(l => l.DisplayOrder)
@@ -74,6 +74,12 @@ namespace TAGWEBAPI.Controllers.Contact
             if (validationError != null)
             {
                 return this.BadRequest(validationError);
+            }
+
+            var denied = await this.CheckCanLinkToVenueAsync(request.EntityType, request.EntityID, request.ContactID).ConfigureAwait(false);
+            if (denied != null)
+            {
+                return denied;
             }
 
             var contact = await this.context.Set<Contact>()
@@ -121,6 +127,26 @@ namespace TAGWEBAPI.Controllers.Contact
                 return this.BadRequest(validationError);
             }
 
+            // The link as it is stored decides who may change it, and the venue it is moved to has to be theirs too.
+            var stored = await this.context.Set<Linker_EntityToContact>()
+                .AsNoTracking()
+                .FirstOrDefaultAsync(l => l.Linker_EntityToContactID == id)
+                .ConfigureAwait(false);
+            if (stored != null && stored.EntityType == LinkedEntityTypes.Venue)
+            {
+                var notOwner = await this.RequireVenueManagerAsync(stored.EntityID).ConfigureAwait(false);
+                if (notOwner != null)
+                {
+                    return notOwner;
+                }
+            }
+
+            var denied = await this.CheckCanLinkToVenueAsync(link.EntityType, link.EntityID, link.ContactID).ConfigureAwait(false);
+            if (denied != null)
+            {
+                return denied;
+            }
+
             var contact = await this.context.Set<Contact>()
                 .AsNoTracking()
                 .FirstOrDefaultAsync(c => c.ContactID == link.ContactID)
@@ -165,10 +191,81 @@ namespace TAGWEBAPI.Controllers.Contact
                 return this.NotFound();
             }
 
+            if (link.EntityType == LinkedEntityTypes.Venue)
+            {
+                var notOwner = await this.RequireVenueManagerAsync(link.EntityID).ConfigureAwait(false);
+                if (notOwner != null)
+                {
+                    return notOwner;
+                }
+            }
+
             this.context.Set<Linker_EntityToContact>().Remove(link);
             await this.context.SaveChangesAsync().ConfigureAwait(false);
 
             return this.NoContent();
+        }
+
+        // The links the caller may read. A venue's private links, and every link of a venue that is not public, are only
+        // for that venue's managers. Links of artists, users and vendors are not filtered here.
+        private async Task<IQueryable<Linker_EntityToContact>> VisibleLinksAsync()
+        {
+            var userId = VenueAccess.GetUserId(this.User);
+            var isStaff = userId.HasValue && await VenueAccess.IsStaffAsync(this.context, userId.Value).ConfigureAwait(false);
+            var owned = userId.HasValue && !isStaff
+                ? await this.context.Set<Linker_UserToVenue>().AsNoTracking().Where(l => l.UserID == userId.Value).Select(l => l.VenueID).ToListAsync().ConfigureAwait(false)
+                : new List<int>();
+
+            return this.context.Set<Linker_EntityToContact>().Where(l =>
+                l.EntityType != LinkedEntityTypes.Venue
+                || isStaff
+                || owned.Contains(l.EntityID)
+                || (l.Scope != ContactScope.Private
+                    && this.context.Set<Venue>().Any(v => v.VenueID == l.EntityID && v.IsPublished && !v.IsModerationBlocked)));
+        }
+
+        private async Task<ActionResult?> RequireVenueManagerAsync(int venueId)
+        {
+            var userId = VenueAccess.GetUserId(this.User);
+            if (userId == null)
+            {
+                return this.Unauthorized();
+            }
+
+            return await VenueAccess.CanManageAsync(this.context, venueId, userId.Value).ConfigureAwait(false)
+                ? null
+                : this.StatusCode(StatusCodes.Status403Forbidden, new { message = "You are not allowed to manage the contacts of this venue." });
+        }
+
+        // Linking a contact to a venue needs that venue's owner. The contact must also be new, or already belong to venues
+        // the caller manages: otherwise someone could link another person's private contact to their own venue's public page.
+        private async Task<ActionResult?> CheckCanLinkToVenueAsync(string entityType, int entityId, int contactId)
+        {
+            if (entityType != LinkedEntityTypes.Venue)
+            {
+                return null;
+            }
+
+            var notOwner = await this.RequireVenueManagerAsync(entityId).ConfigureAwait(false);
+            if (notOwner != null)
+            {
+                return notOwner;
+            }
+
+            var linkedElsewhere = await this.context.Set<Linker_EntityToContact>()
+                .AsNoTracking()
+                .AnyAsync(l => l.ContactID == contactId && l.EntityType != LinkedEntityTypes.Venue)
+                .ConfigureAwait(false);
+            var userId = VenueAccess.GetUserId(this.User);
+            if (linkedElsewhere && !await VenueAccess.IsStaffAsync(this.context, userId!.Value).ConfigureAwait(false))
+            {
+                return this.StatusCode(StatusCodes.Status403Forbidden, new { message = "That contact belongs to something else." });
+            }
+
+            var otherVenueIds = await VenueDataAccess.VenueIdsForContactAsync(this.context, contactId).ConfigureAwait(false);
+            return await VenueDataAccess.CanManageAllAsync(this.context, otherVenueIds, userId).ConfigureAwait(false)
+                ? null
+                : this.StatusCode(StatusCodes.Status403Forbidden, new { message = "That contact belongs to another venue." });
         }
 
         private static string? ValidateRequest(string entityType, int entityId)
