@@ -113,7 +113,7 @@ public class ArtistController : ControllerBase
             return NotFound();
         }
 
-        return Ok(MapArtistForApi(artist));
+        return Ok(MapArtistForApi(artist, await ArtistRegions.LoadAsync(_context, artist.ArtistID).ConfigureAwait(false)));
     }
 
     [HttpGet("{slug}")]
@@ -139,7 +139,7 @@ public class ArtistController : ControllerBase
             return this.NotFound();
         }
 
-        return Ok(MapArtistForApi(artist));
+        return Ok(MapArtistForApi(artist, await ArtistRegions.LoadAsync(_context, artist.ArtistID).ConfigureAwait(false)));
     }
 
     [HttpGet("check-slug/{slug}")]
@@ -330,6 +330,7 @@ public class ArtistController : ControllerBase
         }
 
         // Process contacts into appropriate structures for the API response
+        var artistRegions = await ArtistRegions.LoadAsync(_context, artist.ArtistID).ConfigureAwait(false);
         var addresses = contactLinks
             .Where(l => l.Contact != null && string.Equals(l.Contact.ContactType, "address", StringComparison.OrdinalIgnoreCase) && l.Contact.Address != null)
             .Select(l => new {
@@ -374,6 +375,7 @@ public class ArtistController : ControllerBase
                 artist.SEOTags,
                 artist.Applied,
                 artist.Since,
+                Regions = artistRegions,
                 userId = artistUserId
             },
             profilePic = artist.ProfilePic,
@@ -391,8 +393,15 @@ public class ArtistController : ControllerBase
 
     private static object MapArtistForApi(Artist artist)
     {
+        return MapArtistForApi(artist, null);
+    }
+
+    // `regions` is null when the response does not load them (the artist list), and a list, possibly empty, when it does.
+    private static object MapArtistForApi(Artist artist, IReadOnlyList<RegionDto>? regions)
+    {
         return new
         {
+            Regions = regions,
             artist.ArtistID,
             artist.Applied,
             artist.Country,
