@@ -12,7 +12,8 @@ public class Event
     [Key]
     public int EventID { get; set; }
 
-    public int ArtistID { get; set; }
+    // Null when the venue hosts the event itself. Then the venue's owners (or staff) manage it.
+    public int? ArtistID { get; set; }
 
     public decimal Cost { get; set; }
 
@@ -62,7 +63,7 @@ public class Event
     public EventStatus StatusID { get; set; } = EventStatus.Draft;
 
     // Navigation properties
-    public Artist Artist { get; set; }
+    public Artist? Artist { get; set; }
 
     public EventCategory? EventCategory { get; set; }
 
