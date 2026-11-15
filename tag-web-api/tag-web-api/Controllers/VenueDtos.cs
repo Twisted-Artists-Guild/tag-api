@@ -41,6 +41,20 @@ namespace TAGWEBAPI.Controllers
         public bool? IsModerationBlocked { get; set; }
     }
 
+    /// <summary>The venue's street address. The country is always the United States for now.</summary>
+    public class VenueAddressRequest
+    {
+        public string? AddressLine1 { get; set; }
+
+        public string? AddressLine2 { get; set; }
+
+        public string? City { get; set; }
+
+        public string? State { get; set; }
+
+        public string? ZipCode { get; set; }
+    }
+
     public class VenueOwnerAssignRequest
     {
         public int UserID { get; set; }

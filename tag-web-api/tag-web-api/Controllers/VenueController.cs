@@ -22,6 +22,8 @@ namespace TAGWEBAPI.Controllers
         private const int DescriptionMaxLength = 20000;
         private const int VenueNameMaxLength = 1000;
         private const string AddressNotFoundMessage = "AddressID is required and must reference an existing address.";
+        private const string PendingAddressLine = "Pending venue address";
+        private static readonly Regex ZipCodeRegex = new Regex(@"^\d{5}(-\d{4})?$", RegexOptions.Compiled);
         private readonly TAGDBContext context;
         private readonly ILogger<VenueController> logger;
 
@@ -217,7 +219,7 @@ namespace TAGWEBAPI.Controllers
 
             var address = new Address
             {
-                AddressLine1 = "Pending venue address",
+                AddressLine1 = PendingAddressLine,
                 City = "Pending",
                 State = string.Empty,
                 Country = "Pending",
@@ -423,6 +425,12 @@ namespace TAGWEBAPI.Controllers
                 return this.BadRequest(AddressNotFoundMessage);
             }
 
+            // A venue is listed as soon as it is published, so it needs the address from the onboarding form first.
+            if (request.IsPublished == true && !venue.IsPublished && await this.IsPlaceholderAddressAsync(request.AddressID).ConfigureAwait(false))
+            {
+                return this.BadRequest("Add the venue's address before publishing.");
+            }
+
             // Only whitelisted fields are copied. The logo and the plaintext copies are managed elsewhere.
             venue.Name = request.Name!.Trim();
             venue.AddressID = request.AddressID;
@@ -459,6 +467,89 @@ namespace TAGWEBAPI.Controllers
                 shortText: "Venue updated",
                 tags: "scope=audit;entity=venue;event=profile;operation=update;result=success;channel=db",
                 loggedData: $"venueId={venue.VenueID};name={venue.Name}",
+                userId: userId)
+                .ConfigureAwait(false);
+
+            return this.NoContent();
+        }
+
+        // Whether the signed-in user may edit this venue. The edit pages use it to turn everyone else away.
+        [HttpGet("{id:int}/access")]
+        public async Task<IActionResult> GetVenueAccess(int id)
+        {
+            var userId = VenueAccess.GetUserId(this.User);
+            if (userId == null)
+            {
+                return this.Unauthorized();
+            }
+
+            if (!await this.context.Set<Venue>().AnyAsync(v => v.VenueID == id).ConfigureAwait(false))
+            {
+                return this.NotFound();
+            }
+
+            var isStaff = await VenueAccess.IsStaffAsync(this.context, userId.Value).ConfigureAwait(false);
+            var isOwner = await VenueAccess.IsOwnerAsync(this.context, id, userId.Value).ConfigureAwait(false);
+            return this.Ok(new { canManage = isStaff || isOwner, isStaff, isOwner });
+        }
+
+        // Saves the venue's street address. Owners and staff only. The address row is only ever the venue's own: when
+        // another venue still shares it, this venue gets a new row instead, so one owner can never change another venue.
+        [HttpPut("{id:int}/address")]
+        public async Task<IActionResult> PutVenueAddress(int id, [FromBody] VenueAddressRequest request)
+        {
+            var userId = VenueAccess.GetUserId(this.User);
+            if (userId == null)
+            {
+                return this.Unauthorized();
+            }
+
+            var venue = await this.context.Set<Venue>().FirstOrDefaultAsync(v => v.VenueID == id).ConfigureAwait(false);
+            if (venue == null)
+            {
+                return this.NotFound();
+            }
+
+            // Permission is decided before anything about the request is validated or applied.
+            if (!await VenueAccess.CanManageAsync(this.context, id, userId.Value).ConfigureAwait(false))
+            {
+                return this.Forbidden("You are not allowed to edit this venue.");
+            }
+
+            if (request == null)
+            {
+                return this.BadRequest("An address is required.");
+            }
+
+            var validationError = ValidateAddressRequest(request);
+            if (validationError != null)
+            {
+                return this.BadRequest(validationError);
+            }
+
+            var address = await this.context.Set<Address>().FirstOrDefaultAsync(a => a.AddressID == venue.AddressID).ConfigureAwait(false);
+            var isShared = address != null
+                && await this.context.Set<Venue>().AnyAsync(v => v.AddressID == address.AddressID && v.VenueID != id).ConfigureAwait(false);
+            if (address == null || isShared)
+            {
+                address = new Address();
+                this.context.Set<Address>().Add(address);
+                venue.Address = address;
+            }
+
+            address.AddressLine1 = request.AddressLine1;
+            address.AddressLine2 = request.AddressLine2;
+            address.City = request.City;
+            address.State = request.State;
+            address.ZipCode = request.ZipCode;
+            address.Country = "USA";
+
+            await this.context.SaveChangesAsync().ConfigureAwait(false);
+
+            await this.TryWriteAuditLogAsync(
+                shortText: "Venue address updated",
+                tags: "scope=audit;entity=venue;event=address;operation=update;result=success;channel=db",
+                loggedData: $"venueId={venue.VenueID};city={address.City};state={address.State}",
                 userId: userId)
                 .ConfigureAwait(false);
 
@@ -585,6 +676,60 @@ namespace TAGWEBAPI.Controllers
         private Task<bool> AddressExistsAsync(int addressId)
         {
             return this.context.Set<Address>().AnyAsync(a => a.AddressID == addressId);
+        }
+
+        // The address a venue gets when its slug is reserved, before the owner has entered the real one.
+        private Task<bool> IsPlaceholderAddressAsync(int addressId)
+        {
+            return this.context.Set<Address>().AnyAsync(a => a.AddressID == addressId && (a.AddressLine1 == PendingAddressLine || a.City == "Pending"));
+        }
+
+        // Trims and validates the writable address fields in place; returns an error message, or null when valid.
+        // The state becomes its two-letter code, whether the caller sent the code or the full name.
+        private static string? ValidateAddressRequest(VenueAddressRequest request)
+        {
+            request.AddressLine1 = request.AddressLine1?.Trim();
+            request.AddressLine2 = string.IsNullOrWhiteSpace(request.AddressLine2) ? null : request.AddressLine2.Trim();
+            request.City = request.City?.Trim();
+            request.State = request.State?.Trim();
+            request.ZipCode = request.ZipCode?.Trim();
+
+            if (string.IsNullOrEmpty(request.AddressLine1))
+            {
+                return "Street address is required.";
+            }
+
+            if (request.AddressLine1.Length > 255 || (request.AddressLine2?.Length ?? 0) > 255)
+            {
+                return "Address lines must be at most 255 characters.";
+            }
+
+            if (string.IsNullOrEmpty(request.City))
+            {
+                return "City is required.";
+            }
+
+            if (request.City.Length > 100)
+            {
+                return "City must be at most 100 characters.";
+            }
+
+            var state = request.State ?? string.Empty;
+            var stateCode = UsStates.Names.Keys.FirstOrDefault(code => string.Equals(code, state, StringComparison.OrdinalIgnoreCase))
+                ?? UsStates.Names.FirstOrDefault(pair => string.Equals(pair.Value, state, StringComparison.OrdinalIgnoreCase)).Key;
+            if (stateCode == null)
+            {
+                return "State must be a US state or DC.";
+            }
+
+            request.State = stateCode;
+
+            if (string.IsNullOrEmpty(request.ZipCode) || !ZipCodeRegex.IsMatch(request.ZipCode))
+            {
+                return "Zip code must be 5 digits, or 5 digits, a dash and 4 digits.";
+            }
+
+            return null;
         }
 
         // Published, unblocked venues are visible to any signed-in user; drafts and blocked venues only to their owners and staff.
