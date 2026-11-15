@@ -96,7 +96,7 @@ namespace TAGWEBAPI.Controllers
                 return this.NotFound();
             }
 
-            return this.Ok(MapVenueForApi(venue));
+            return this.Ok(MapVenueForApi(venue, await this.HasOwnerAsync(venue.VenueID).ConfigureAwait(false)));
         }
 
         [HttpGet("byID/{id}")]
@@ -111,7 +111,7 @@ namespace TAGWEBAPI.Controllers
                 return this.NotFound();
             }
 
-            return this.Ok(MapVenueForApi(venue));
+            return this.Ok(MapVenueForApi(venue, await this.HasOwnerAsync(venue.VenueID).ConfigureAwait(false)));
         }
 
         [HttpGet("check-slug/{slug}")]
@@ -179,7 +179,7 @@ namespace TAGWEBAPI.Controllers
                 return this.NotFound();
             }
 
-            return this.Ok(MapVenueForApi(venue));
+            return this.Ok(MapVenueForApi(venue, await this.HasOwnerAsync(venue.VenueID).ConfigureAwait(false)));
         }
 
         [HttpPost("reserve-slug")]
@@ -896,10 +896,23 @@ namespace TAGWEBAPI.Controllers
             return null;
         }
 
+        // Whether anyone manages the venue. Only a yes or no is shared, never who: it lets the public page ask visitors to
+        // get in touch when nobody has taken the venue over yet.
+        private Task<bool> HasOwnerAsync(int venueId)
+        {
+            return this.context.Set<Linker_UserToVenue>().AsNoTracking().AnyAsync(l => l.VenueID == venueId);
+        }
+
         internal static object MapVenueForApi(Venue venue)
+        {
+            return MapVenueForApi(venue, null);
+        }
+
+        internal static object MapVenueForApi(Venue venue, bool? hasOwner)
         {
             return new
             {
+                HasOwner = hasOwner,
                 venue.VenueID,
                 Name = CoalescePlaintext(venue.Name_Plaintext, venue.Name),
                 NameRichtext = venue.Name,

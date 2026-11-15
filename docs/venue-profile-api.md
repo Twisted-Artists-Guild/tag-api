@@ -43,6 +43,12 @@ Saving a venue that is already published is never blocked by this rule.
 
 The description is stored exactly as sent, up to 20,000 characters. The website sanitizes it before saving (the same rich-text rules as the rest of the site) and again wherever it is shown. Anything else that renders it must sanitize it too.
 
+## Public venue page (story #334)
+
+- **`hasOwner`:** venue reads (`GET /api/venue/{id}`, `/byID/{id}`, `/by-slug/{slug}`) return `hasOwner`, true when someone manages the venue. It never says who. The public page uses it to show "Own this venue? Contact us" on unowned venues.
+- **Draft and blocked venues:** they are still not public. Only their owners and staff can read them, so the page can preview them for those people.
+- **Upcoming events:** `GET /api/event?venueId=5&upcoming=true&limit=10` lists a venue's published events that have not ended, soonest first. `upcoming` keeps events that are on now, `limit` defaults to 50 and is never more than 50, and either filter orders the list by start time. Without `venueId` and `upcoming` the list is the same as before.
+
 ## Moderation
 
 Only staff can change `isModerationBlocked`. A client that sends the stored value back unchanged is accepted, so the wizard can send the whole venue.
