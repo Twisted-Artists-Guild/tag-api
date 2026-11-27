@@ -94,21 +94,23 @@ namespace TAGWEBAPI.Controllers
             }
 
             var userId = VenueAccess.GetUserId(User);
-            var canManage = userId.HasValue && await CanManageEventAsync(@event, userId.Value);
+            var role = userId.HasValue ? await EventAccess.GetRoleAsync(_context, @event, userId.Value) : EventRole.None;
+            var canManage = EventAccess.Allows(role, EventAction.Edit);
+            var canView = EventAccess.Allows(role, EventAction.View);
 
-            // A draft or an event waiting for review is private to the people who manage it.
-            if (!canManage && (@event.StatusID == EventStatus.Draft || @event.StatusID == EventStatus.PendingReview))
+            // A draft or an event waiting for review is private to the people involved in it.
+            if (!canView && (@event.StatusID == EventStatus.Draft || @event.StatusID == EventStatus.PendingReview))
             {
                 return NotFound();
             }
 
             // So is an event of a venue that is not public.
-            if (!canManage && (@event.Venue == null || !@event.Venue.IsPublished || @event.Venue.IsModerationBlocked))
+            if (!canView && (@event.Venue == null || !@event.Venue.IsPublished || @event.Venue.IsModerationBlocked))
             {
                 return NotFound();
             }
 
-            return Ok(MapEventForApi(@event, canManage));
+            return Ok(MapEventForApi(@event, canManage, role));
         }
 
         // Every event a venue's managers can see in the venue portal: the venue's own events in any state, plus other
@@ -336,7 +338,7 @@ namespace TAGWEBAPI.Controllers
                 return NotFound();
             }
 
-            if (!await CanManageEventAsync(@event, userId.Value))
+            if (!await CanManageEventAsync(@event, userId.Value, EventAction.Delete))
             {
                 return Forbidden("You are not allowed to delete this event.");
             }
@@ -714,20 +716,11 @@ namespace TAGWEBAPI.Controllers
         private static bool IsEditable(EventStatus status) =>
             status == EventStatus.Draft || status == EventStatus.PendingReview || status == EventStatus.Published;
 
-        // Who runs an event: an artist's event belongs to that artist's users. An event with no artist is hosted by its
-        // venue, so the venue's owners run it. A venue's owners can see, but not change, an artist's event at the venue.
-        // Staff can manage every event.
-        private async Task<bool> CanManageEventAsync(Event @event, int userId)
-        {
-            if (await VenueAccess.IsStaffAsync(_context, userId))
-            {
-                return true;
-            }
-
-            return @event.ArtistID is int artistId
-                ? await ArtistAccess.IsOwnerAsync(_context, artistId, userId)
-                : await VenueAccess.IsOwnerAsync(_context, @event.VenueID, userId);
-        }
+        // Who runs an event is decided in EventAccess: the owner (an artist's users, or the venue's owners for an event the
+        // venue hosts, plus staff) and the collaborators added as event hosts, each with a role. A venue's owners can see,
+        // but not change, an artist's event at the venue. Editing, publishing and cancelling need the Admin role or above.
+        private Task<bool> CanManageEventAsync(Event @event, int userId, EventAction action = EventAction.Edit) =>
+            EventAccess.CanAsync(_context, @event, userId, action);
 
         // Checks that the user may create an event for this artist at this venue. With no artist the venue hosts the
         // event. Returns the error to send, or null when it is allowed.
@@ -1060,13 +1053,16 @@ namespace TAGWEBAPI.Controllers
             }
         }
 
-        private static object MapEventForApi(Event @event) => MapEventForApi(@event, null);
+        private static object MapEventForApi(Event @event) => MapEventForApi(@event, null, null);
 
-        private static object MapEventForApi(Event @event, bool? canManage)
+        private static object MapEventForApi(Event @event, bool? canManage) => MapEventForApi(@event, canManage, null);
+
+        private static object MapEventForApi(Event @event, bool? canManage, EventRole? role)
         {
             return new
             {
                 CanManage = canManage,
+                MyRole = role?.ToString(),
                 @event.EventID,
                 @event.ArtistID,
                 @event.Cost,

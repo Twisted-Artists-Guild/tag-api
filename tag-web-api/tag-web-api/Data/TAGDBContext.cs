@@ -40,6 +40,8 @@ namespace TAGWEBAPI.Data
 
         public DbSet<Event> Events { get; set; }
 
+        public DbSet<EventHost> EventHosts { get; set; }
+
         public DbSet<EventCategory> EventCategories { get; set; }
 
         public DbSet<ExternalLink> ExternalLinks { get; set; }
@@ -211,6 +213,7 @@ namespace TAGWEBAPI.Data
             modelBuilder.ApplyConfiguration(new TAGWEBAPI.Models.Configurations.LogConfiguration());
             modelBuilder.ApplyConfiguration(new TAGWEBAPI.Models.Configurations.ListingConfiguration());
             modelBuilder.ApplyConfiguration(new TAGWEBAPI.Models.Configurations.EventConfiguration());
+            modelBuilder.ApplyConfiguration(new TAGWEBAPI.Models.Configurations.EventHostConfiguration());
             modelBuilder.ApplyConfiguration(new TAGWEBAPI.Models.Configurations.StaffConfiguration());
             modelBuilder.ApplyConfiguration(new TAGWEBAPI.Models.Configurations.StaffRoleConfiguration());
             modelBuilder.ApplyConfiguration(new TAGWEBAPI.Models.Configurations.TicketConfiguration());
