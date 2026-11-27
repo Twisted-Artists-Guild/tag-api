@@ -66,15 +66,25 @@ events differently.
   "doors": "2026-12-01T18:30:00Z",
   "cost": 10,
   "minimumAge": 18,
-  "maxOccupancy": 120
+  "maxOccupancy": 120,
+  "timeZoneId": "America/New_York",
+  "salesStart": "2026-11-20T14:00:00Z",
+  "salesEnd": "2026-12-01T22:00:00Z",
+  "checkInWindowMinutes": 60
 }
 ```
 
 - Times are stored as UTC. A time with no zone is taken as UTC, which is how the site shows event times.
 - The title is stored as text-safe markup with its plain text beside it, and the description's plain text is worked out on the server.
 - Limits: title 255 characters, point of contact 1000, cost 0 to 1,000,000, minimum age 0 to 120, occupancy 0 to 1,000,000.
+- `timeZoneId` is an IANA zone id; an unknown one is rejected and a blank one clears it. Events created before it existed have none.
+- `salesStart` / `salesEnd` bound ticket sales (both optional). Sales must end after they start and before the event ends. A time that is left out is kept as it was.
+- `checkInWindowMinutes` is how long before the event check-in staff may start scanning: 0 to 360, default 60.
 
 ## Database
 
 Run `sql_scripts/332_venue_hosted_events.sql` before deploying the API. It makes `Events.ArtistID` optional and adds an index on
 `(VenueID, StartTime)`. It is safe to run again and changes no data.
+
+Run `sql_scripts/420_event_model_v2.sql` for the event time zone, sales window and check-in window columns (story #420). It is also
+safe to run again and changes no data.

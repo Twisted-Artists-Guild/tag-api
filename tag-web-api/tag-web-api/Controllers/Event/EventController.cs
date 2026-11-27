@@ -399,6 +399,11 @@ namespace TAGWEBAPI.Controllers
                 venueEvent.Doors = venueEvent.StartTime;
             }
 
+            if (venueEvent.SalesEnd.HasValue && venueEvent.SalesEnd.Value > venueEvent.EndTime)
+            {
+                return BadRequest(new { message = "Ticket sales must end before the event ends." });
+            }
+
             _context.Events.Add(venueEvent);
             try
             {
@@ -451,6 +456,16 @@ namespace TAGWEBAPI.Controllers
             if (@event.EndTime <= @event.StartTime)
             {
                 return BadRequest(new { message = "The end time must be after the start time." });
+            }
+
+            if (@event.SalesEnd.HasValue && @event.SalesEnd.Value > @event.EndTime)
+            {
+                return BadRequest(new { message = "Ticket sales must end before the event ends." });
+            }
+
+            if (@event.SalesStart.HasValue && @event.SalesEnd.HasValue && @event.SalesEnd.Value <= @event.SalesStart.Value)
+            {
+                return BadRequest(new { message = "Ticket sales must end after they start." });
             }
 
             if (@event.StatusID == EventStatus.Published)
@@ -789,6 +804,11 @@ namespace TAGWEBAPI.Controllers
                 problems.Add("Doors must open at or before the start time.");
             }
 
+            if (@event.SalesEnd.HasValue && @event.SalesEnd.Value > @event.EndTime)
+            {
+                problems.Add("Ticket sales must end before the event ends.");
+            }
+
             // Event times are local wall-clock times, so allow for the furthest time zone before calling an event over.
             if (checkNotEnded && @event.EndTime < DateTime.UtcNow.AddHours(-14))
             {
@@ -875,7 +895,48 @@ namespace TAGWEBAPI.Controllers
                 return "The end time must be after the start time.";
             }
 
+            if (!string.IsNullOrWhiteSpace(request.TimeZoneId) && !IsValidTimeZone(request.TimeZoneId.Trim()))
+            {
+                return "That time zone is not valid.";
+            }
+
+            if (request.CheckInWindowMinutes is < 0 or > Event.MaxCheckInWindowMinutes)
+            {
+                return $"Check-in can open at most {Event.MaxCheckInWindowMinutes} minutes before the event.";
+            }
+
+            foreach (var time in new[] { request.SalesStart, request.SalesEnd })
+            {
+                if (time.HasValue && (time.Value.Year < 2000 || time.Value.Year > 2100))
+                {
+                    return "That date is not valid.";
+                }
+            }
+
+            if (request.SalesStart.HasValue && request.SalesEnd.HasValue && ToUtc(request.SalesEnd.Value) <= ToUtc(request.SalesStart.Value))
+            {
+                return "Ticket sales must end after they start.";
+            }
+
             return null;
+        }
+
+        private static bool IsValidTimeZone(string id)
+        {
+            if (id.Length == 0 || id.Length > 64)
+            {
+                return false;
+            }
+
+            try
+            {
+                TimeZoneInfo.FindSystemTimeZoneById(id);
+                return true;
+            }
+            catch (Exception ex) when (ex is TimeZoneNotFoundException or InvalidTimeZoneException)
+            {
+                return false;
+            }
         }
 
         // Copies the fields that were sent. The title is stored as safe markup with its plain text beside it, like the
@@ -928,6 +989,27 @@ namespace TAGWEBAPI.Controllers
             if (request.MaxOccupancy.HasValue)
             {
                 @event.MaxOccupancy = request.MaxOccupancy.Value;
+            }
+
+            if (request.TimeZoneId != null)
+            {
+                var zone = request.TimeZoneId.Trim();
+                @event.TimeZoneId = zone.Length == 0 ? null : zone;
+            }
+
+            if (request.SalesStart.HasValue)
+            {
+                @event.SalesStart = ToUtc(request.SalesStart.Value);
+            }
+
+            if (request.SalesEnd.HasValue)
+            {
+                @event.SalesEnd = ToUtc(request.SalesEnd.Value);
+            }
+
+            if (request.CheckInWindowMinutes.HasValue)
+            {
+                @event.CheckInWindowMinutes = request.CheckInWindowMinutes.Value;
             }
         }
 
@@ -1016,6 +1098,10 @@ namespace TAGWEBAPI.Controllers
                 @event.LogoPic,
                 @event.StatusID,
                 Status = @event.StatusID.ToString(),
+                @event.TimeZoneId,
+                @event.SalesStart,
+                @event.SalesEnd,
+                @event.CheckInWindowMinutes,
             };
         }
 
@@ -1100,6 +1186,15 @@ namespace TAGWEBAPI.Controllers
         public int? MaxOccupancy { get; set; }
 
         public string? PointOfContact { get; set; }
+
+        // IANA time zone id, for example America/New_York.
+        public string? TimeZoneId { get; set; }
+
+        public DateTime? SalesStart { get; set; }
+
+        public DateTime? SalesEnd { get; set; }
+
+        public int? CheckInWindowMinutes { get; set; }
     }
 
     public class EventSlugUpdateRequest
