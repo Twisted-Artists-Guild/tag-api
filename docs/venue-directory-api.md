@@ -27,6 +27,7 @@ All parameters are optional, and filters combine: a venue has to match **every**
 | `zip` | Matches by prefix (`303` finds `30318`). Only digits and a hyphen are used. A value with no digits is ignored. |
 | `cursor` | The `nextCursor` from the previous page. Leave it out for the first page. |
 | `limit` | Venues per page. Default 12, from 1 to 50. |
+| `sort` | `name` (A to Z, the default), `newest`, `oldest` or `category` (by the venue's first category A to Z, venues with none last). Anything else means `name`. A `nextCursor` only works with the `sort` it came from, otherwise `400`. |
 
 Text parameters are trimmed and cut at 100 characters, and each repeatable parameter uses at most 10 values.
 
@@ -59,13 +60,13 @@ GET /api/venue/list?q=west&category=theaters&category=galleries&state=GA&tag=par
 ```
 
 - `name` is plain text. `slug` is the page address: `/venue/{slug}`.
-- `logoUrl` is `null` when the venue has no logo.
+- `logoUrl` is `null` when the venue has no logo. `profilePicUrl` is `null` when it has no active profile picture. The website card shows the profile picture, and falls back to the logo.
 - `nextCursor` is `null` on the last page. A page with no matches returns `items: []` and no cursor.
 - Nothing private is returned: no owner, no draft or moderation flags, no contact details.
 
 ## Paging
 
-Venues come back **alphabetically by name** (ignoring case), and venues with the same name are ordered by id, so the order never changes between requests.
+By default venues come back **alphabetically by name** (ignoring case), and with `sort=newest` or `oldest` by when they were added (venues have no created or modified timestamp, so the id, which only goes up, stands in for it). In every sort venues with the same name are ordered by id, so the order never changes between requests.
 The cursor holds the name and id of the last venue on the page, and the next page starts right after it. This means:
 
 - a long list is never loaded in one go,

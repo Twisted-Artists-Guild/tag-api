@@ -155,7 +155,7 @@ public class VenueListTests
         Assert.Empty(plain.Regions);
 
         var fields = typeof(VenueListItemDto).GetProperties().Select(p => p.Name).OrderBy(n => n).ToArray();
-        Assert.Equal(new[] { "Categories", "City", "Description", "LogoUrl", "Name", "Regions", "Slug", "State", "Tags", "VenueID" }, fields);
+        Assert.Equal(new[] { "Categories", "City", "Description", "LogoUrl", "Name", "ProfilePicUrl", "Regions", "Slug", "State", "Tags", "VenueID" }, fields);
     }
 
     // ---- name search
@@ -437,4 +437,65 @@ public class VenueListTests
 
         Assert.Empty(page.Items);
     }
-}
+
+    // ---- sorting (story #409)
+
+    private static async Task<List<int>> SortedIdsAsync(string databaseName, string? sort, int limit)
+    {
+        var options = await SeedAsync(databaseName);
+        await using var context = new TAGDBContext(options);
+        var ids = new List<int>();
+        string? cursor = null;
+        do
+        {
+            var result = await new VenueListController(context).ListVenues(null, null, null, null, null, null, null, cursor, limit, sort);
+            var page = Assert.IsType<VenueListPageDto>(Assert.IsType<OkObjectResult>(result.Result).Value);
+            ids.AddRange(page.Items.Select(i => i.VenueID));
+            cursor = page.NextCursor;
+        }
+        while (cursor != null);
+        return ids;
+    }
+
+    [Theory]
+    [InlineData(null, new[] { 3, 7, 4, 1, 2, 8 })]
+    [InlineData("name", new[] { 3, 7, 4, 1, 2, 8 })]
+    [InlineData("nonsense", new[] { 3, 7, 4, 1, 2, 8 })]
+    [InlineData("newest", new[] { 8, 7, 4, 3, 2, 1 })]
+    [InlineData("OLDEST", new[] { 1, 2, 3, 4, 7, 8 })]
+    [InlineData("category", new[] { 1, 2, 3, 4, 7, 8 })]
+    public async Task Sort_OrdersTheList_AndPagingNeverRepeatsOrSkipsAVenue(string? sort, int[] expected)
+    {
+        Assert.Equal(expected, await SortedIdsAsync($"sort-all-{sort}", sort, 100));
+        Assert.Equal(expected, await SortedIdsAsync($"sort-paged-{sort}", sort, 2));
+        Assert.Equal(expected, await SortedIdsAsync($"sort-single-{sort}", sort, 1));
+    }
+
+    [Fact]
+    public async Task ACursorFromOneSort_IsRefusedByAnother()
+    {
+        var options = await SeedAsync(nameof(ACursorFromOneSort_IsRefusedByAnother));
+        await using var context = new TAGDBContext(options);
+        var controller = new VenueListController(context);
+        var first = Assert.IsType<VenueListPageDto>(Assert.IsType<OkObjectResult>((await controller.ListVenues(limit: 2, sort: "newest")).Result).Value);
+
+        var result = await controller.ListVenues(cursor: first.NextCursor, limit: 2, sort: "name");
+
+        Assert.IsType<BadRequestObjectResult>(result.Result);
+    }
+
+    [Fact]
+    public async Task ItemsCarryTheProfilePicture_ForTheCard()
+    {
+        var options = await SeedAsync(nameof(ItemsCarryTheProfilePicture_ForTheCard));
+        await using var context = new TAGDBContext(options);
+        context.Pictures.Add(new Picture { PictureID = 51, URL = "https://cdn.example.com/profile.jpg" });
+        context.Set<Venue>().Single(v => v.VenueID == 1).ProfilePicID = 51;
+        await context.SaveChangesAsync();
+
+        var page = Assert.IsType<VenueListPageDto>(Assert.IsType<OkObjectResult>((await new VenueListController(context).ListVenues()).Result).Value);
+
+        Assert.Equal("https://cdn.example.com/profile.jpg", page.Items.Single(i => i.VenueID == 1).ProfilePicUrl);
+        Assert.Equal("https://cdn.example.com/terminal-west.jpg", page.Items.Single(i => i.VenueID == 1).LogoUrl);
+        Assert.Null(page.Items.Single(i => i.VenueID == 2).ProfilePicUrl);
+    }}
