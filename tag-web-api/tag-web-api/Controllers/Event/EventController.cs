@@ -94,21 +94,23 @@ namespace TAGWEBAPI.Controllers
             }
 
             var userId = VenueAccess.GetUserId(User);
-            var canManage = userId.HasValue && await CanManageEventAsync(@event, userId.Value);
+            var role = userId.HasValue ? await EventAccess.GetRoleAsync(_context, @event, userId.Value) : EventRole.None;
+            var canManage = EventAccess.Allows(role, EventAction.Edit);
+            var canView = EventAccess.Allows(role, EventAction.View);
 
-            // A draft or an event waiting for review is private to the people who manage it.
-            if (!canManage && (@event.StatusID == EventStatus.Draft || @event.StatusID == EventStatus.PendingReview))
+            // A draft or an event waiting for review is private to the people involved in it.
+            if (!canView && (@event.StatusID == EventStatus.Draft || @event.StatusID == EventStatus.PendingReview))
             {
                 return NotFound();
             }
 
             // So is an event of a venue that is not public.
-            if (!canManage && (@event.Venue == null || !@event.Venue.IsPublished || @event.Venue.IsModerationBlocked))
+            if (!canView && (@event.Venue == null || !@event.Venue.IsPublished || @event.Venue.IsModerationBlocked))
             {
                 return NotFound();
             }
 
-            return Ok(MapEventForApi(@event, canManage));
+            return Ok(MapEventForApi(@event, canManage, role));
         }
 
         // Every event a venue's managers can see in the venue portal: the venue's own events in any state, plus other
@@ -336,7 +338,7 @@ namespace TAGWEBAPI.Controllers
                 return NotFound();
             }
 
-            if (!await CanManageEventAsync(@event, userId.Value))
+            if (!await CanManageEventAsync(@event, userId.Value, EventAction.Delete))
             {
                 return Forbidden("You are not allowed to delete this event.");
             }
@@ -399,6 +401,11 @@ namespace TAGWEBAPI.Controllers
                 venueEvent.Doors = venueEvent.StartTime;
             }
 
+            if (venueEvent.SalesEnd.HasValue && venueEvent.SalesEnd.Value > venueEvent.EndTime)
+            {
+                return BadRequest(new { message = "Ticket sales must end before the event ends." });
+            }
+
             _context.Events.Add(venueEvent);
             try
             {
@@ -451,6 +458,16 @@ namespace TAGWEBAPI.Controllers
             if (@event.EndTime <= @event.StartTime)
             {
                 return BadRequest(new { message = "The end time must be after the start time." });
+            }
+
+            if (@event.SalesEnd.HasValue && @event.SalesEnd.Value > @event.EndTime)
+            {
+                return BadRequest(new { message = "Ticket sales must end before the event ends." });
+            }
+
+            if (@event.SalesStart.HasValue && @event.SalesEnd.HasValue && @event.SalesEnd.Value <= @event.SalesStart.Value)
+            {
+                return BadRequest(new { message = "Ticket sales must end after they start." });
             }
 
             if (@event.StatusID == EventStatus.Published)
@@ -699,20 +716,11 @@ namespace TAGWEBAPI.Controllers
         private static bool IsEditable(EventStatus status) =>
             status == EventStatus.Draft || status == EventStatus.PendingReview || status == EventStatus.Published;
 
-        // Who runs an event: an artist's event belongs to that artist's users. An event with no artist is hosted by its
-        // venue, so the venue's owners run it. A venue's owners can see, but not change, an artist's event at the venue.
-        // Staff can manage every event.
-        private async Task<bool> CanManageEventAsync(Event @event, int userId)
-        {
-            if (await VenueAccess.IsStaffAsync(_context, userId))
-            {
-                return true;
-            }
-
-            return @event.ArtistID is int artistId
-                ? await ArtistAccess.IsOwnerAsync(_context, artistId, userId)
-                : await VenueAccess.IsOwnerAsync(_context, @event.VenueID, userId);
-        }
+        // Who runs an event is decided in EventAccess: the owner (an artist's users, or the venue's owners for an event the
+        // venue hosts, plus staff) and the collaborators added as event hosts, each with a role. A venue's owners can see,
+        // but not change, an artist's event at the venue. Editing, publishing and cancelling need the Admin role or above.
+        private Task<bool> CanManageEventAsync(Event @event, int userId, EventAction action = EventAction.Edit) =>
+            EventAccess.CanAsync(_context, @event, userId, action);
 
         // Checks that the user may create an event for this artist at this venue. With no artist the venue hosts the
         // event. Returns the error to send, or null when it is allowed.
@@ -787,6 +795,11 @@ namespace TAGWEBAPI.Controllers
             if (@event.Doors > @event.StartTime)
             {
                 problems.Add("Doors must open at or before the start time.");
+            }
+
+            if (@event.SalesEnd.HasValue && @event.SalesEnd.Value > @event.EndTime)
+            {
+                problems.Add("Ticket sales must end before the event ends.");
             }
 
             // Event times are local wall-clock times, so allow for the furthest time zone before calling an event over.
@@ -875,7 +888,48 @@ namespace TAGWEBAPI.Controllers
                 return "The end time must be after the start time.";
             }
 
+            if (!string.IsNullOrWhiteSpace(request.TimeZoneId) && !IsValidTimeZone(request.TimeZoneId.Trim()))
+            {
+                return "That time zone is not valid.";
+            }
+
+            if (request.CheckInWindowMinutes is < 0 or > Event.MaxCheckInWindowMinutes)
+            {
+                return $"Check-in can open at most {Event.MaxCheckInWindowMinutes} minutes before the event.";
+            }
+
+            foreach (var time in new[] { request.SalesStart, request.SalesEnd })
+            {
+                if (time.HasValue && (time.Value.Year < 2000 || time.Value.Year > 2100))
+                {
+                    return "That date is not valid.";
+                }
+            }
+
+            if (request.SalesStart.HasValue && request.SalesEnd.HasValue && ToUtc(request.SalesEnd.Value) <= ToUtc(request.SalesStart.Value))
+            {
+                return "Ticket sales must end after they start.";
+            }
+
             return null;
+        }
+
+        private static bool IsValidTimeZone(string id)
+        {
+            if (id.Length == 0 || id.Length > 64)
+            {
+                return false;
+            }
+
+            try
+            {
+                TimeZoneInfo.FindSystemTimeZoneById(id);
+                return true;
+            }
+            catch (Exception ex) when (ex is TimeZoneNotFoundException or InvalidTimeZoneException)
+            {
+                return false;
+            }
         }
 
         // Copies the fields that were sent. The title is stored as safe markup with its plain text beside it, like the
@@ -929,6 +983,27 @@ namespace TAGWEBAPI.Controllers
             {
                 @event.MaxOccupancy = request.MaxOccupancy.Value;
             }
+
+            if (request.TimeZoneId != null)
+            {
+                var zone = request.TimeZoneId.Trim();
+                @event.TimeZoneId = zone.Length == 0 ? null : zone;
+            }
+
+            if (request.SalesStart.HasValue)
+            {
+                @event.SalesStart = ToUtc(request.SalesStart.Value);
+            }
+
+            if (request.SalesEnd.HasValue)
+            {
+                @event.SalesEnd = ToUtc(request.SalesEnd.Value);
+            }
+
+            if (request.CheckInWindowMinutes.HasValue)
+            {
+                @event.CheckInWindowMinutes = request.CheckInWindowMinutes.Value;
+            }
         }
 
         // The database stores UTC. A time with no zone is taken as UTC, which is how the site shows event times.
@@ -978,13 +1053,16 @@ namespace TAGWEBAPI.Controllers
             }
         }
 
-        private static object MapEventForApi(Event @event) => MapEventForApi(@event, null);
+        private static object MapEventForApi(Event @event) => MapEventForApi(@event, null, null);
 
-        private static object MapEventForApi(Event @event, bool? canManage)
+        private static object MapEventForApi(Event @event, bool? canManage) => MapEventForApi(@event, canManage, null);
+
+        private static object MapEventForApi(Event @event, bool? canManage, EventRole? role)
         {
             return new
             {
                 CanManage = canManage,
+                MyRole = role?.ToString(),
                 @event.EventID,
                 @event.ArtistID,
                 @event.Cost,
@@ -1016,6 +1094,10 @@ namespace TAGWEBAPI.Controllers
                 @event.LogoPic,
                 @event.StatusID,
                 Status = @event.StatusID.ToString(),
+                @event.TimeZoneId,
+                @event.SalesStart,
+                @event.SalesEnd,
+                @event.CheckInWindowMinutes,
             };
         }
 
@@ -1100,6 +1182,15 @@ namespace TAGWEBAPI.Controllers
         public int? MaxOccupancy { get; set; }
 
         public string? PointOfContact { get; set; }
+
+        // IANA time zone id, for example America/New_York.
+        public string? TimeZoneId { get; set; }
+
+        public DateTime? SalesStart { get; set; }
+
+        public DateTime? SalesEnd { get; set; }
+
+        public int? CheckInWindowMinutes { get; set; }
     }
 
     public class EventSlugUpdateRequest

@@ -65,6 +65,12 @@ public class EventConfiguration : IEntityTypeConfiguration<Event>
         builder.Property(e => e.LogoPicID)
             .IsRequired(false);
 
+        builder.Property(e => e.TimeZoneId)
+            .HasMaxLength(64);
+
+        builder.Property(e => e.CheckInWindowMinutes)
+            .HasDefaultValue(Event.DefaultCheckInWindowMinutes);
+
         builder.HasIndex(e => e.Path)
             .IsUnique();
 

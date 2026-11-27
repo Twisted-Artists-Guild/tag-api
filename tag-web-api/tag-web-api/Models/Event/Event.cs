@@ -62,6 +62,22 @@ public class Event
 
     public EventStatus StatusID { get; set; } = EventStatus.Draft;
 
+    // IANA time zone the event takes place in (for example America/New_York). Null for events created before time
+    // zones were recorded.
+    public string? TimeZoneId { get; set; }
+
+    // Window in which tickets can be bought. Null means no limit on that side.
+    public DateTime? SalesStart { get; set; }
+
+    public DateTime? SalesEnd { get; set; }
+
+    // How long before the doors open check-in staff may start scanning tickets.
+    public int CheckInWindowMinutes { get; set; } = DefaultCheckInWindowMinutes;
+
+    public const int DefaultCheckInWindowMinutes = 60;
+
+    public const int MaxCheckInWindowMinutes = 360;
+
     // Navigation properties
     public Artist? Artist { get; set; }
 
