@@ -53,7 +53,8 @@ public class VenueListController : ControllerBase
         [FromQuery] string? state = null,
         [FromQuery] string? zip = null,
         [FromQuery] string? cursor = null,
-        [FromQuery] int limit = DefaultPageSize)
+        [FromQuery] int limit = DefaultPageSize,
+        [FromQuery] string? sort = null)
     {
         var query = this.context.Set<Venue>().AsNoTracking().Where(v => v.IsPublished && !v.IsModerationBlocked);
 
@@ -105,25 +106,47 @@ public class VenueListController : ControllerBase
             query = query.Where(v => v.TagLinks.Any(link => link.Tag!.Name == tagName));
         }
 
+        var sortMode = ParseSort(sort);
+        var pageSize = Math.Clamp(limit, 1, MaxPageSize);
+
+        // Every sort ends with the id, so the order is total and a page boundary never repeats or skips a venue.
+        var keyed = query.Select(v => new
+        {
+            v.VenueID,
+            NameKey = (v.Name_Plaintext ?? v.Name).ToLower(),
+            CategoryKey = v.CategoryLinks.Select(l => "a" + l.Category!.Name.ToLower()).OrderBy(n => n).FirstOrDefault() ?? "b",
+        });
+
         if (!string.IsNullOrEmpty(cursor))
         {
-            if (!TryDecodeCursor(cursor, out var cursorKey, out var cursorId))
+            if (!TryDecodeCursor(cursor, out var cursorKey, out var cursorName, out var cursorId, out var cursorSort) || cursorSort != sortMode)
             {
                 return this.BadRequest(new { message = "The cursor is not valid." });
             }
 
-            query = query.Where(v =>
-                string.Compare((v.Name_Plaintext ?? v.Name).ToLower(), cursorKey) > 0
-                || ((v.Name_Plaintext ?? v.Name).ToLower() == cursorKey && v.VenueID > cursorId));
+            keyed = sortMode switch
+            {
+                "newest" => keyed.Where(v => v.VenueID < cursorId),
+                "oldest" => keyed.Where(v => v.VenueID > cursorId),
+                "category" => keyed.Where(v =>
+                    string.Compare(v.CategoryKey, cursorKey) > 0
+                    || (v.CategoryKey == cursorKey && (string.Compare(v.NameKey, cursorName) > 0 || (v.NameKey == cursorName && v.VenueID > cursorId)))),
+                _ => keyed.Where(v =>
+                    string.Compare(v.NameKey, cursorKey) > 0
+                    || (v.NameKey == cursorKey && v.VenueID > cursorId)),
+            };
         }
 
-        var pageSize = Math.Clamp(limit, 1, MaxPageSize);
+        var ordered = sortMode switch
+        {
+            "newest" => keyed.OrderByDescending(v => v.VenueID),
+            "oldest" => keyed.OrderBy(v => v.VenueID),
+            "category" => keyed.OrderBy(v => v.CategoryKey).ThenBy(v => v.NameKey).ThenBy(v => v.VenueID),
+            _ => keyed.OrderBy(v => v.NameKey).ThenBy(v => v.VenueID),
+        };
 
-        // The page is chosen first, using only the sort key and id. The details are loaded afterwards for just those venues.
-        var page = await query
-            .OrderBy(v => (v.Name_Plaintext ?? v.Name).ToLower())
-            .ThenBy(v => v.VenueID)
-            .Select(v => new { v.VenueID, SortKey = (v.Name_Plaintext ?? v.Name).ToLower() })
+        // The page is chosen first, using only the sort keys and id. The details are loaded afterwards for just those venues.
+        var page = await ordered
             .Take(pageSize + 1)
             .ToListAsync()
             .ConfigureAwait(false);
@@ -140,12 +163,23 @@ public class VenueListController : ControllerBase
             .ToListAsync()
             .ConfigureAwait(false);
         var byId = venues.ToDictionary(v => v.VenueID);
+        var last = pageRows.Count > 0 ? pageRows[^1] : null;
 
         return this.Ok(new VenueListPageDto
         {
             Items = pageRows.Where(p => byId.ContainsKey(p.VenueID)).Select(p => ToItem(byId[p.VenueID])).ToList(),
-            NextCursor = hasMore ? EncodeCursor(pageRows[^1].SortKey, pageRows[^1].VenueID) : null,
+            NextCursor = hasMore && last != null
+                ? EncodeCursor(sortMode == "category" ? last.CategoryKey : last.NameKey, last.NameKey, last.VenueID, sortMode)
+                : null,
         });
+    }
+
+    // name (A to Z, the default), newest or oldest (by when the venue was added), or category (by the first category, A to Z).
+    // Venues have no created or modified timestamp, and ids only ever go up, so the id stands in for "added".
+    private static string ParseSort(string? sort)
+    {
+        var value = (sort ?? string.Empty).Trim().ToLowerInvariant();
+        return value is "newest" or "oldest" or "category" ? value : "name";
     }
 
     private static VenueListItemDto ToItem(Venue venue)
@@ -165,6 +199,7 @@ public class VenueListController : ControllerBase
             City = venue.Address?.City,
             State = venue.Address?.State,
             LogoUrl = venue.LogoPic?.URL,
+            ProfilePicUrl = venue.ProfilePic?.URL,
             Categories = venue.CategoryLinks
                 .Where(link => link.Category != null)
                 .Select(link => link.Category!)
@@ -232,15 +267,17 @@ public class VenueListController : ControllerBase
     }
 
     // The cursor is the sort key and id of the last venue on the page, packed into one opaque, URL-safe value.
-    private static string EncodeCursor(string sortKey, int venueId)
+    private static string EncodeCursor(string sortKey, string nameKey, int venueId, string sort)
     {
-        var json = JsonSerializer.Serialize(new CursorPayload { K = sortKey, I = venueId });
+        var json = JsonSerializer.Serialize(new CursorPayload { K = sortKey, N = nameKey, I = venueId, S = sort });
         return Convert.ToBase64String(Encoding.UTF8.GetBytes(json)).Replace('+', '-').Replace('/', '_').TrimEnd('=');
     }
 
-    private static bool TryDecodeCursor(string cursor, out string sortKey, out int venueId)
+    private static bool TryDecodeCursor(string cursor, out string sortKey, out string nameKey, out int venueId, out string sort)
     {
         sortKey = string.Empty;
+        nameKey = string.Empty;
+        sort = "name";
         venueId = 0;
         if (cursor.Length > MaxCursorLength)
         {
@@ -258,6 +295,8 @@ public class VenueListController : ControllerBase
             }
 
             sortKey = payload.K;
+            nameKey = payload.N ?? payload.K;
+            sort = ParseSort(payload.S);
             venueId = payload.I;
             return true;
         }
@@ -270,6 +309,10 @@ public class VenueListController : ControllerBase
     private sealed class CursorPayload
     {
         public string? K { get; set; }
+
+        public string? N { get; set; }
+
+        public string? S { get; set; }
 
         public int I { get; set; }
     }
@@ -298,6 +341,8 @@ public class VenueListItemDto
     public string? State { get; set; }
 
     public string? LogoUrl { get; set; }
+
+    public string? ProfilePicUrl { get; set; }
 
     public List<VenueListLabelDto> Categories { get; set; } = new();
 
